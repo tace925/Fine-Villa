@@ -1,0 +1,328 @@
+/* styles.css - Fine Villa Apartments */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    transition: all 0.3s ease;
+}
+
+:root {
+    --gold: #D4AF37;
+    --gold-light: #F5E6A3;
+    --gold-dark: #B8960F;
+    --blue-dark: #0A192F;
+    --blue-deep: #1E3A8A;
+    --blue-light: #3B82F6;
+    --bg-light: #F8F9FA;
+    --text-light: #1E293B;
+    --bg-dark: #0F172A;
+    --card-dark: #1E293B;
+    --text-dark: #E2E8F0;
+    --success: #10B981;
+    --danger: #EF4444;
+    --warning: #F59E0B;
+    --info: #6366F1;
+}
+
+body {
+    font-family: 'Poppins', 'Segoe UI', 'Playfair Display', sans-serif;
+    min-height: 100vh;
+    position: relative;
+}
+
+body.dark {
+    background: var(--bg-dark);
+    color: var(--text-dark);
+}
+
+/* Hero Background */
+.hero-bg {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -2;
+    background: linear-gradient(135deg, rgba(10,25,47,0.85), rgba(30,58,138,0.75)), 
+                url('https://images.pexels.com/photos/106399/pexels-photo-106399.jpeg?auto=compress&cs=tinysrgb&w=1600');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+}
+
+body.dark .hero-bg {
+    background: linear-gradient(135deg, rgba(0,0,0,0.9), rgba(10,25,47,0.95)), 
+                url('https://images.pexels.com/photos/106399/pexels-photo-106399.jpeg?auto=compress&cs=tinysrgb&w=1600');
+    background-size: cover;
+    background-position: center;
+}
+
+/* Typing Animation */
+.typing-container {
+    text-align: center;
+    padding: 2rem;
+    font-family: 'Playfair Display', serif;
+}
+
+.typing-text {
+    font-size: 2.5rem;
+    font-weight: bold;
+    color: var(--gold);
+    border-right: 3px solid var(--gold);
+    white-space: nowrap;
+    overflow: hidden;
+    display: inline-block;
+    animation: blink 0.75s step-end infinite;
+}
+
+@keyframes blink {
+    0%, 100% { border-color: var(--gold); }
+    50% { border-color: transparent; }
+}
+
+/* Glassmorphism Cards */
+.glass-card {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 1.5rem;
+    margin: 1rem;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(212, 175, 55, 0.3);
+}
+
+body.dark .glass-card {
+    background: rgba(30, 41, 59, 0.7);
+    border: 1px solid rgba(212, 175, 55, 0.2);
+}
+
+/* Buttons */
+.btn {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.btn-gold {
+    background: var(--gold);
+    color: var(--blue-dark);
+}
+
+.btn-gold:hover {
+    background: var(--gold-dark);
+    transform: translateY(-2px);
+}
+
+.btn-blue {
+    background: var(--blue-light);
+    color: white;
+}
+
+.btn-danger {
+    background: var(--danger);
+    color: white;
+}
+
+.btn-success {
+    background: var(--success);
+    color: white;
+}
+
+/* Dark Mode Toggle */
+.dark-toggle {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: var(--gold);
+    border: none;
+    border-radius: 50%;
+    width: 45px;
+    height: 45px;
+    cursor: pointer;
+    font-size: 1.5rem;
+    z-index: 1000;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+}
+
+/* Forms */
+input, select, textarea {
+    width: 100%;
+    padding: 0.75rem;
+    margin: 0.5rem 0;
+    border: 1px solid var(--gold);
+    border-radius: 8px;
+    background: rgba(255,255,255,0.9);
+    font-size: 1rem;
+}
+
+body.dark input, body.dark select, body.dark textarea {
+    background: var(--card-dark);
+    color: var(--text-dark);
+    border-color: var(--gold-dark);
+}
+
+/* Tables */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+}
+
+th, td {
+    padding: 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--gold);
+}
+
+/* Search Bar */
+.search-bar {
+    margin: 1rem 0;
+    position: relative;
+}
+
+.search-bar input {
+    padding-left: 2.5rem;
+}
+
+.search-icon {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--gold);
+}
+
+/* Modal */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.7);
+    z-index: 2000;
+    justify-content: center;
+    align-items: center;
+}
+
+.modal-content {
+    background: white;
+    padding: 2rem;
+    border-radius: 20px;
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+body.dark .modal-content {
+    background: var(--card-dark);
+}
+
+/* Footer */
+footer {
+    text-align: center;
+    padding: 2rem;
+    margin-top: 3rem;
+    background: rgba(0,0,0,0.7);
+    color: var(--gold);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .typing-text {
+        font-size: 1.5rem;
+        white-space: normal;
+    }
+    
+    table {
+        font-size: 0.8rem;
+    }
+    
+    .glass-card {
+        margin: 0.5rem;
+        padding: 1rem;
+    }
+}
+
+/* Grid Layout */
+.grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1.5rem;
+}
+
+/* Status Badges */
+.status-pending {
+    background: var(--warning);
+    color: white;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+}
+
+.status-paid {
+    background: var(--success);
+    color: white;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+}
+
+.status-cancelled {
+    background: var(--danger);
+    color: white;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+}
+
+/* Notice Board */
+.notice-item {
+    background: rgba(212, 175, 55, 0.1);
+    padding: 1rem;
+    margin: 0.5rem 0;
+    border-left: 4px solid var(--gold);
+    border-radius: 8px;
+}
+/* Navigation Menu */
+.nav-menu {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    border-bottom: 1px solid rgba(212, 175, 55, 0.3);
+    padding-bottom: 0.5rem;
+}
+
+.nav-link {
+    padding: 0.5rem 1.5rem;
+    color: var(--text-light);
+    text-decoration: none;
+    border-radius: 25px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+body.dark .nav-link {
+    color: var(--text-dark);
+}
+
+.nav-link:hover {
+    background: rgba(212, 175, 55, 0.2);
+    transform: translateY(-2px);
+}
+
+.nav-link.active {
+    background: var(--gold);
+    color: var(--blue-dark);
+}
+
+body.dark .nav-link.active {
+    background: var(--gold);
+    color: var(--blue-dark);
+}

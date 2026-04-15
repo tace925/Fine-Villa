@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Report Issue | Fine Villa Apartments</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="hero-bg"></div>
+    
+    <button id="darkModeToggle" class="dark-toggle">🌙</button>
+    
+    <div class="container" style="max-width: 600px; margin: 2rem auto; padding: 1rem;">
+        <div class="glass-card">
+            <h1 style="color: var(--gold); text-align: center;">📝 Report an Issue</h1>
+            <p style="text-align: center;">Your feedback helps us improve Fine Villa Apartments</p>
+            
+            <form id="complaintForm">
+                <input type="text" id="complainantName" placeholder="Your Full Name" required>
+                <input type="text" id="complainantRoom" placeholder="Room Number" required>
+                <input type="text" id="complainantPhone" placeholder="Phone Number" required>
+                <input type="text" id="complaintSubject" placeholder="Subject" required>
+                <textarea id="complaintMessage" rows="5" placeholder="Describe your issue or feedback in detail..." required></textarea>
+                <button type="submit" class="btn btn-gold" style="width: 100%;">Submit Complaint</button>
+            </form>
+            
+            <div style="text-align: center; margin-top: 1rem;">
+                <a href="index.html" style="color: var(--gold);">← Back to Home</a>
+            </div>
+        </div>
+        
+        <footer>
+            <p>Crafted & Developed by Tevin Mulinge / 0743936403</p>
+        </footer>
+    </div>
+    
+    <script src="script.js"></script>
+    <script src="complaint.js"></script>
+</body>
+</html>

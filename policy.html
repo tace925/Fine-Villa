@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fine Villa Apartments | Rental Policies</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&family=Playfair+Display:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="hero-bg"></div>
+    
+    <button id="darkModeToggle" class="dark-toggle">🌙</button>
+    
+    <div class="container" style="max-width: 1200px; margin: 0 auto; padding: 1rem;">
+        <!-- Typing Animation -->
+        <div class="typing-container">
+            <h1 class="typing-text" id="typingText"></h1>
+        </div>
+        
+        <!-- Tenant Dashboard (Always visible after login check) -->
+        <div id="tenantDashboard">
+            <!-- Navigation Menu -->
+            <div class="glass-card">
+                <div class="nav-menu">
+                    <a href="index.html" class="nav-link">🏠 Dashboard</a>
+                    <a href="policy.html" class="nav-link active">📜 Policies</a>
+                    <a href="team.html" class="nav-link">👥 Our Team</a>
+                </div>
+            </div>
+            
+            <!-- Welcome Header -->
+            <div class="glass-card" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                <div>
+                    <h2>Welcome, <span id="tenantName"></span>!</h2>
+                    <p>Room <span id="tenantRoom"></span> | Floor <span id="tenantFloor"></span></p>
+                </div>
+                <button onclick="logout()" class="btn btn-danger">Logout</button>
+            </div>
+            
+            <!-- Rental Policies -->
+            <div class="glass-card">
+                <h3 style="color: var(--gold);">📜 Rental Policies</h3>
+                <ul style="margin-left: 1.5rem; line-height: 1.8;">
+                    <li>💰 Rent: <strong>KES 8,500</strong> per month</li>
+                    <li>💧 Water: <strong>KES 170</strong> per month</li>
+                    <li>📅 Payment due by <strong>5th</strong> of every month</li>
+                    <li>⚠️ Deadline: <strong>10th</strong> - Late payment incurs <strong>10% penalty</strong> (KES 850 extra)</li>
+                    <li>🏠 4-story building with 200+ rooms</li>
+                    <li>🔒 24/7 Security Guard available | CCTV coming soon</li>
+                    <li>🗑️ Garbage Collection every <strong>Wednesday</strong> - Use paper bags</li>
+                </ul>
+            </div>
+            
+            <!-- Building Info -->
+            <div class="glass-card">
+                <h3 style="color: var(--gold);">🏢 About Fine Villa Apartments</h3>
+                <p><strong>History:</strong> Established in 2015, Fine Villa Apartments has been providing luxury affordable housing in Nairobi. A 4-story building with over 200 modern units.</p>
+                <p><strong>Ownership:</strong> Fine Villa Real Estate Ltd.</p>
+                <p><strong>Opened:</strong> January 15, 2015</p>
+            </div>
+            
+            <!-- Complaint Button -->
+            <div class="glass-card" style="text-align: center;">
+                <a href="complaint.html" class="btn btn-gold">📝 Report an Issue / Complaint</a>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <footer>
+            <p>Crafted & Developed by Tevin Mulinge / 0743936403</p>
+            <p>© 2026 Fine Villa Apartments - Luxury Living Redefined</p>
+        </footer>
+    </div>
+    
+    <script src="script.js"></script>
+    <script src="tenant.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const savedTenant = sessionStorage.getItem('currentTenant');
+        if (!savedTenant) {
+            window.location.href = 'index.html';
+            return;
+        }
+
+        const tenant = JSON.parse(savedTenant);
+        document.getElementById('tenantName').textContent = tenant.name;
+        document.getElementById('tenantRoom').textContent = tenant.room;
+        document.getElementById('tenantFloor').textContent = tenant.floor;
+
+        const container = document.querySelector('.typing-container');
+        container.innerHTML = '<h1 class="typing-text" id="typingText"></h1>';
+        
+        const typingElement = document.getElementById('typingText');
+        typingElement.innerHTML = '';
+        
+        let text1 = 'Fair Policies, Fine Living...';
+        let i = 0;
+        
+        function typeFirst() {
+            if (i < text1.length) {
+                typingElement.innerHTML += text1.charAt(i);
+                i++;
+                setTimeout(typeFirst, 100);
+            } else {
+                typingElement.innerHTML += '<br>';
+                let text2 = 'Welcome To Fine Villa Apartments';
+                let j = 0;
+                function typeSecond() {
+                    if (j < text2.length) {
+                        typingElement.innerHTML += text2.charAt(j);
+                        j++;
+                        setTimeout(typeSecond, 100);
+                    }
+                }
+                typeSecond();
+            }
+        }
+        typeFirst();
+    });
+</script>
+</body>
+</html>
