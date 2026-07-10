@@ -1,7 +1,9 @@
 /* ============================================================
    FINE VILLA LIMITED — SYSTEM CORE  (localStorage prototype)
    ============================================================ */
-const STORE_KEY = "fv-system-data-v2";
+const SUPABASE_URL = "https://ybqwivcmznzqwxupvjii.supabase.co";
+const SUPABASE_KEY = "sb_publishable_p09ka2D_3bB-gkl_Et-XDQ_I6GosAfG";
+const REST = SUPABASE_URL + "/rest/v1/fv_state";
 const DAY = 86400000;
 let DB = null;
 let app = { page:"home", portal:null, identity:null, portalTab:null, theme:"dark" };
@@ -58,18 +60,47 @@ function seedDB(){
   };
 }
 
-/* ---------------- localStorage load/save ---------------- */
-function loadDB(){
+/* ---------------- Supabase load/save ---------------- */
+async function loadDB(){
   try{
-    const raw = localStorage.getItem(STORE_KEY);
-    DB = raw? JSON.parse(raw) : seedDB();
-  }catch(e){ DB = seedDB(); }
-  if(!DB) DB = seedDB();
-  saveDB(false);
+    const res = await fetch(REST + "?id=eq.1&select=data", {
+      headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + SUPABASE_KEY }
+    });
+    if(!res.ok) throw new Error("Supabase fetch failed: " + res.status);
+    const rows = await res.json();
+    if(rows && rows[0] && rows[0].data && Object.keys(rows[0].data).length){
+      DB = rows[0].data;
+    } else {
+      DB = seedDB();
+      await pushDB();
+    }
+  }catch(e){
+    console.error(e);
+    toast("Could not reach the server — working offline for now");
+    DB = seedDB();
+  }
 }
 function saveDB(showToast){
-  try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); if(showToast) toast("Saved"); }
-  catch(e){ console.error(e); toast("Could not save — storage may be full"); }
+  pushDB();
+  if(showToast) toast("Saved");
+}
+async function pushDB(){
+  try{
+    const res = await fetch(REST + "?id=eq.1", {
+      method: "PATCH",
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: "Bearer " + SUPABASE_KEY,
+        "Content-Type": "application/json",
+        Prefer: "return=minimal"
+      },
+      body: JSON.stringify({ data: DB, updated_at: new Date().toISOString() })
+    });
+    if(!res.ok) throw new Error("Supabase save failed: " + res.status);
+  }catch(e){
+    console.error(e);
+    toast("Could not sync to server");
+  }
 }
 function logAudit(actor, action, detail){
   DB.auditLog.unshift({id:Date.now(), actor, action, detail, ts:Date.now()});
@@ -640,19 +671,87 @@ function tabTenants(){
   return `
   <div class="card">
     <h3>🧾 Tenant Records</h3>
-    <table><thead><tr><th>House</th><th>Name</th><th>Phone</th><th>Email</th><th>Balance</th><th>Passcode</th><th></th></tr></thead>
+    <table><thead><tr><th>House</th><th>Name</th><th>Phone</th><th>Rent Expected</th><th>Balance</th><th>Last Payment</th><th></th></tr></thead>
     <tbody>
       ${DB.tenants.map((t,i)=>`<tr>
         <td>${esc(t.house)}</td>
-        <td><input data-edit="name" data-idx="${i}" value="${esc(t.name)}" style="padding:4px 6px;"></td>
-        <td><input data-edit="phone" data-idx="${i}" value="${esc(t.phone)}" style="padding:4px 6px;"></td>
-        <td><input data-edit="email" data-idx="${i}" value="${esc(t.email)}" style="padding:4px 6px;"></td>
-        <td><input data-edit="balance" data-idx="${i}" value="${t.balance||0}" style="padding:4px 6px; width:90px;"></td>
-        <td><span class="pass-chip">${esc(t.passcode)}</span></td>
-        <td><button class="btn3d btn-ghost" data-saverow="${i}">💾</button></td>
+        <td>${esc(t.name)}</td>
+        <td>${esc(t.phone)}</td>
+        <td>${money(t.rentExpected||0)}</td>
+        <td style="color:${(t.balance||0)>0?'var(--danger)':'var(--ok)'}">${money(t.balance||0)}</td>
+        <td>${esc(t.lastPayment||'—')}</td>
+        <td><button class="btn3d btn-sm" data-edittenant="${i}">✎ Edit</button></td>
       </tr>`).join('') || `<tr><td colspan="7" style="color:var(--muted)">No tenants yet — generate one in the "Generate Tenant" tab.</td></tr>`}
     </tbody></table>
   </div>`;
+}
+function openTenantEditModal(i){
+  const t = DB.tenants[i];
+  const back = document.createElement('div');
+  back.innerHTML = `<div class="modal-back" id="tenantEditModal"><div class="modal">
+    <h3>✎ Edit Tenant — House ${esc(t.house)}</h3>
+    <div class="row">
+      <div class="field"><label>Full Name</label><input id="te_name" value="${esc(t.name)}"></div>
+      <div class="field"><label>House No. (001–200)</label><input id="te_house" value="${esc(t.house)}"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Phone</label><input id="te_phone" value="${esc(t.phone)}"></div>
+      <div class="field"><label>Email</label><input id="te_email" value="${esc(t.email||'')}"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Rent Expected / Month</label><input id="te_expected" value="${t.rentExpected||0}"></div>
+      <div class="field"><label>Balance</label><input id="te_balance" value="${t.balance||0}"></div>
+    </div>
+    <div id="tenantEditErr" style="color:var(--danger); font-size:12.5px; margin-bottom:10px;"></div>
+    <button class="btn3d btn-gold" id="teSave" style="width:100%; margin-bottom:16px;">💾 Save Details</button>
+
+    <div style="border-top:1px solid var(--line); padding-top:14px;">
+      <h4 style="font-size:12px; color:var(--gold); margin-bottom:10px; text-transform:uppercase; letter-spacing:1px;">Record a Payment</h4>
+      <div class="field"><label>Amount Received</label><input id="te_payment" placeholder="e.g. 18670"></div>
+      <button class="btn3d btn-gold" id="teRecordPayment" style="width:100%;">➕ Record Payment</button>
+      <div style="font-size:11px;color:var(--muted); margin-top:8px;">Last payment: ${esc(t.lastPayment||'—')}. Recording a payment adds it to "Paid this month" and reduces the balance.</div>
+    </div>
+
+    <button class="btn3d btn-ghost" id="teCancel" style="width:100%; margin-top:16px;">Close</button>
+  </div></div>`;
+  document.body.appendChild(back.firstElementChild);
+  document.getElementById('teCancel').onclick = ()=> document.getElementById('tenantEditModal').remove();
+
+  document.getElementById('teSave').onclick = ()=>{
+    const newHouse = document.getElementById('te_house').value.trim().padStart(3,'0');
+    const oldHouse = t.house;
+    const newName = document.getElementById('te_name').value.trim() || t.name;
+    if(newHouse !== oldHouse){
+      const clash = DB.tenants.find((x,xi)=>xi!==i && x.house===newHouse);
+      if(clash){ document.getElementById('tenantEditErr').textContent = `House ${newHouse} already has a tenant (${clash.name}).`; return; }
+      const oldH = DB.houses.find(h=>h.no===oldHouse); if(oldH){ oldH.status='emp'; oldH.tenant=null; }
+      const newH = DB.houses.find(h=>h.no===newHouse); if(newH){ newH.status='occ'; newH.tenant=newName; }
+      logAudit(identityName(), 'reassigned tenant', `${newName}: House ${oldHouse} → ${newHouse}`);
+    }
+    t.name = newName; t.house = newHouse; t.no = newHouse;
+    t.phone = document.getElementById('te_phone').value.trim();
+    t.email = document.getElementById('te_email').value.trim();
+    t.rentExpected = parseFloat(document.getElementById('te_expected').value)||0;
+    t.balance = parseFloat(document.getElementById('te_balance').value)||0;
+    const h = DB.houses.find(h=>h.no===t.house); if(h) h.tenant = t.name;
+    logAudit(identityName(), 'updated tenant record for', `${t.name} (House ${t.house})`);
+    saveDB(true);
+    document.getElementById('tenantEditModal').remove();
+    render();
+  };
+
+  document.getElementById('teRecordPayment').onclick = ()=>{
+    const amt = parseFloat(document.getElementById('te_payment').value);
+    if(!amt || amt<=0){ document.getElementById('tenantEditErr').textContent = 'Enter a valid payment amount.'; return; }
+    t.rentPaid = (t.rentPaid||0) + amt;
+    t.balance = Math.max(0, (t.balance||0) - amt);
+    t.lastPayment = new Date().toISOString().slice(0,10);
+    logAudit(identityName(), 'recorded a payment for', `${t.name} — ${money(amt)}`);
+    saveDB(true);
+    document.getElementById('tenantEditModal').remove();
+    toast('Payment recorded');
+    render();
+  };
 }
 
 /* ---------------- COMPLAINTS ---------------- */
@@ -869,15 +968,8 @@ function attachPageEvents(){
     saveDB(true); toast('Report sent to Agent');
   };
 
-  document.querySelectorAll('[data-saverow]').forEach(b=>{
-    b.onclick = ()=>{
-      const i = b.dataset.saverow;
-      const t = DB.tenants[i];
-      document.querySelectorAll(`[data-idx="${i}"]`).forEach(inp=>{
-        t[inp.dataset.edit] = inp.dataset.edit==='balance' ? (parseFloat(inp.value)||0) : inp.value;
-      });
-      saveDB(true);
-    };
+  document.querySelectorAll('[data-edittenant]').forEach(b=>{
+    b.onclick = ()=> openTenantEditModal(parseInt(b.dataset.edittenant));
   });
 
   const sendComplaint = document.getElementById('sendComplaint');
@@ -984,8 +1076,8 @@ function startTyping(){
 /* ============================================================
    BOOT
    ============================================================ */
-(function boot(){
-  loadDB();
+(async function boot(){
+  await loadDB();
   initChrome();
   render();
 })();
