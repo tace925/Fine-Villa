@@ -23,9 +23,10 @@ function seedDB(){
     houses.push({no, status: occ?'occ':'emp', tenant: i===134? 'Telvin Nyinge' : (occ? 'Tenant '+no : null), maintLog:[], lastInspected:null});
   }
   return {
-    owner:{name:"Mr. Daniel Kamau", role:"Director / Owner", phone:"0721 404 647", email:"finevillaproperties@gmail.com", since:2016, photo:"🧔🏾"},
-    agents:[{name:"Grace Wambui", id:"31245678", phone:"0733 221 044", passcode:"agt-001-4T7Q", since:2021, photo:"👩🏾‍💼", active:true}],
-    caretakers:[{name:"Samuel Otieno", phone:"0798 112 233", email:"s.otieno@finevilla.co.ke", passcode:"care-001-9X2M", since:2022, photo:"👨🏿‍🔧", active:true}],
+    owner:{name:"Mr. Daniel Kamau", role:"Director / Owner", phone:"0721 404 647", email:"finevillaproperties@gmail.com", start:new Date('2016-01-01').getTime(), photo:"🧔🏾"},
+    ownerHistory:[],
+    agents:[{name:"Grace Wambui", id:"31245678", phone:"0733 221 044", passcode:"agt-001-4T7Q", start:new Date('2021-03-01').getTime(), end:null, photo:"👩🏾‍💼", active:true}],
+    caretakers:[{name:"Samuel Otieno", phone:"0798 112 233", email:"s.otieno@finevilla.co.ke", passcode:"care-001-9X2M", start:new Date('2022-06-01').getTime(), end:null, photo:"👨🏿‍🔧", active:true}],
     tenants:[{no:"134", name:"Telvin Nyinge", phone:"0712 000 134", email:"telvin.nyinge@example.com", passcode:"tent-134-8K1L", house:"134", rentExpected:18670, rentPaid:8670, balance:80761, lastPayment:"2026-06-22", active:true}],
     messages:[
       {id:1, from:"Agent", to:"Admin", subject:"May Occupancy Summary", body:"142 of 200 units occupied. Two vacancies flagged for repainting before listing.", ts:Date.now()-DAY*2, file:null}
@@ -80,6 +81,48 @@ async function loadDB(){
     toast("Could not reach the server — working offline for now");
     DB = seedDB();
   }
+  normalizeDB();
+  pushDB();
+}
+
+// Backfills any fields that didn't exist yet when this data was last saved
+// (e.g. older records saved before "start/end" timestamps or photos were
+// introduced), so older saved data never crashes newer code.
+function normalizeDB(){
+  const seed = seedDB();
+  if(!DB.owner) DB.owner = seed.owner;
+  if(!DB.owner.start){
+    DB.owner.start = DB.owner.since ? new Date(DB.owner.since, 0, 1).getTime() : Date.now();
+  }
+  if(DB.owner.photo===undefined) DB.owner.photo = seed.owner.photo;
+  if(!DB.ownerHistory) DB.ownerHistory = [];
+
+  ['agents','caretakers'].forEach(key=>{
+    if(!Array.isArray(DB[key])) DB[key]=[];
+    DB[key].forEach(r=>{
+      if(!r.start){ r.start = r.since ? new Date(r.since, 0, 1).getTime() : Date.now(); }
+      if(r.end===undefined) r.end = null;
+      if(r.active===undefined) r.active = true;
+      if(r.photo===undefined) r.photo = null;
+    });
+  });
+  if(!Array.isArray(DB.tenants)) DB.tenants=[];
+  DB.tenants.forEach(t=>{
+    if(t.active===undefined) t.active = true;
+    if(t.rentExpected===undefined) t.rentExpected = 0;
+    if(t.rentPaid===undefined) t.rentPaid = 0;
+    if(t.balance===undefined) t.balance = 0;
+  });
+  if(!DB.tour) DB.tour = seed.tour;
+  if(!Array.isArray(DB.tour.gallery)) DB.tour.gallery = seed.tour.gallery;
+  DB.tour.gallery.forEach(g=>{ if(g.url===undefined) g.url=null; });
+  if(!Array.isArray(DB.policies)) DB.policies = seed.policies;
+  if(!Array.isArray(DB.auditLog)) DB.auditLog = [];
+  if(!Array.isArray(DB.messages)) DB.messages = [];
+  if(!Array.isArray(DB.complaints)) DB.complaints = [];
+  if(!Array.isArray(DB.houses) || DB.houses.length!==200) DB.houses = seed.houses;
+  if(!DB.notices) DB.notices = seed.notices;
+  ['global','agent','caretaker','tenant'].forEach(b=>{ if(!Array.isArray(DB.notices[b])) DB.notices[b]=[]; });
 }
 function saveDB(showToast){
   pushDB();
@@ -132,6 +175,36 @@ async function uploadTourImage(idx, file){
     toast('Upload failed — check that the "tour-images" bucket exists and is public');
   }
 }
+
+async function uploadPersonPhoto(role, file){
+  if(!file) return;
+  if(!file.type.startsWith('image/')){ toast('Please choose an image file'); return; }
+  if(file.size > 5*1024*1024){ toast('Image is too large — please keep it under 5MB'); return; }
+  toast('Uploading photo…');
+  const safeName = file.name.replace(/[^a-zA-Z0-9.]/g,'-');
+  const path = `people/${role}-${Date.now()}-${safeName}`;
+  try{
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${path}`, {
+      method:'POST',
+      headers:{ apikey: SUPABASE_KEY, Authorization: 'Bearer '+SUPABASE_KEY, 'Content-Type': file.type },
+      body: file
+    });
+    if(!res.ok) throw new Error('Upload failed: '+res.status);
+    const url = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${path}`;
+    if(role==='admin'){
+      DB.owner.photo = url;
+      app.identity = { ...DB.owner };
+    } else {
+      const list = role==='agent'? DB.agents : DB.caretakers;
+      const rec = list.find(r=>r.passcode===app.identity.passcode);
+      if(rec){ rec.photo = url; app.identity = { ...rec }; }
+    }
+    saveDB(true); render();
+  }catch(e){
+    console.error(e);
+    toast('Upload failed — check that the "tour-images" bucket exists and is public');
+  }
+}
 function logAudit(actor, action, detail){
   DB.auditLog.unshift({id:Date.now(), actor, action, detail, ts:Date.now()});
   if(DB.auditLog.length>200) DB.auditLog.length=200;
@@ -155,6 +228,36 @@ function toCSV(rows){
   return rows.map(r=>r.map(c=>`"${(c??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
 }
 function notExpired(n){ return (Date.now() - n.ts) < DAY*30; }
+function isImgUrl(p){ return typeof p==='string' && p.indexOf('http')===0; }
+function getCurrent(list){
+  const actives = (list||[]).filter(x=>x.active!==false).sort((a,b)=>(b.start||0)-(a.start||0));
+  return actives[0] || null;
+}
+function formatDuration(ms){
+  if(ms<0) ms=0;
+  let sec = Math.floor(ms/1000);
+  const years = Math.floor(sec/(365*86400)); sec-=years*365*86400;
+  const months = Math.floor(sec/(30*86400)); sec-=months*30*86400;
+  const days = Math.floor(sec/86400); sec-=days*86400;
+  const hours = Math.floor(sec/3600); sec-=hours*3600;
+  const mins = Math.floor(sec/60); sec-=mins*60;
+  const secs = sec;
+  const cell = (n,l)=>`<div class="cd-row"><b>${n}</b><span>${l}</span></div>`;
+  return `<div class="countdown-row">${cell(years,'yrs')}${cell(months,'mo')}${cell(days,'d')}${cell(hours,'h')}${cell(mins,'m')}${cell(secs,'s')}</div>`;
+}
+function startCountdowns(){
+  clearInterval(window.__cdInt);
+  const els = document.querySelectorAll('[data-countdown]');
+  if(!els.length) return;
+  function tick(){
+    els.forEach(el=>{
+      const start = parseInt(el.dataset.countdown);
+      el.innerHTML = start ? formatDuration(Date.now()-start) : '';
+    });
+  }
+  tick();
+  window.__cdInt = setInterval(tick, 1000);
+}
 
 function svgDonut(occ, empty){
   const total=occ+empty || 1; const pct=occ/total; const r=52, c=2*Math.PI*r;
@@ -200,27 +303,42 @@ function render(){
     chip.classList.add('hide'); menuSession.classList.add('hide');
   }
 
-  if(app.page==='home') main.innerHTML = pageHome();
-  else if(app.page==='tour') main.innerHTML = pageTour();
-  else if(app.page==='policies') main.innerHTML = pagePolicies();
-  else if(app.page==='notices') main.innerHTML = pageNotices();
-  else if(app.page==='portal') main.innerHTML = pagePortal();
+  try{
+    if(app.page==='home') main.innerHTML = pageHome();
+    else if(app.page==='tour') main.innerHTML = pageTour();
+    else if(app.page==='policies') main.innerHTML = pagePolicies();
+    else if(app.page==='notices') main.innerHTML = pageNotices();
+    else if(app.page==='portal') main.innerHTML = pagePortal();
+  }catch(e){
+    console.error('Render error:', e);
+    main.innerHTML = `<div class="card" style="margin-top:30px;">
+      <h3>⚠️ Something went wrong loading this page</h3>
+      <div style="color:var(--muted); font-size:13px; margin-bottom:14px;">${esc(e.message)}</div>
+      <button class="btn3d btn-gold" id="reloadBtn">Reload</button>
+    </div>`;
+    const rb = document.getElementById('reloadBtn');
+    if(rb) rb.onclick = ()=> location.reload();
+    return;
+  }
 
   attachPageEvents();
 
-  // Tie the typing animation to the element that is actually on screen
-  // right now, so it never types into a detached/replaced node.
-  if(app.page==='home') startTyping();
+  // Tie the typing animation and countdowns to the elements actually on
+  // screen right now, so they never run against a detached/replaced node.
+  if(app.page==='home'){ startTyping(); startCountdowns(); }
+  else { clearInterval(window.__typeInt); clearInterval(window.__cdInt); }
 }
 
 /* ---------------- HOME ---------------- */
 function pageHome(){
   const occ = DB.houses.filter(h=>h.status==='occ').length, total=DB.houses.length;
   const pct = Math.round(occ/total*100);
+  const curAgent = getCurrent(DB.agents);
+  const curCaretaker = getCurrent(DB.caretakers);
   const people = [
-    {role:'Owner', name:DB.owner.name, photo:DB.owner.photo, rank:'Director / Owner', yrs:(2026-DB.owner.since)},
-    {role:'Agent', name:DB.agents[0]?.name||'—', photo:DB.agents[0]?.photo||'💼', rank:'Managing Agent', yrs: DB.agents[0]? (2026-DB.agents[0].since):0},
-    {role:'Caretaker', name:DB.caretakers[0]?.name||'—', photo:DB.caretakers[0]?.photo||'🧰', rank:'On-site Caretaker', yrs: DB.caretakers[0]? (2026-DB.caretakers[0].since):0}
+    {role:'Owner', name:DB.owner.name, photo:DB.owner.photo, rank:'Director / Owner', start:DB.owner.start},
+    {role:'Agent', name: curAgent? curAgent.name : 'Currently Vacant', photo: curAgent? (curAgent.photo||'💼') : '💼', rank:'Managing Agent', start: curAgent? curAgent.start : null},
+    {role:'Caretaker', name: curCaretaker? curCaretaker.name : 'Currently Vacant', photo: curCaretaker? (curCaretaker.photo||'🧰') : '🧰', rank:'On-site Caretaker', start: curCaretaker? curCaretaker.start : null}
   ];
   return `
   <section class="hero">
@@ -239,20 +357,19 @@ function pageHome(){
   </section>
   <section class="section">
     <h2>The People Behind Fine Villa</h2>
-    <div class="sub">Tap a card to flip it and see how long they've served.</div>
+    <div class="sub">Tap a card to flip it — this updates automatically as roles change hands.</div>
     <div class="cardgrid">
       ${people.map((p,i)=>`
         <div class="flip" data-flip="${i}">
           <div class="flip-inner">
             <div class="flip-face flip-front">
-              <div class="photo">${p.photo}</div>
+              <div class="photo">${isImgUrl(p.photo)? `<img src="${esc(p.photo)}" alt="${esc(p.name)}">` : `<span>${p.photo||'❔'}</span>`}</div>
               <div class="cap"><b>${esc(p.name)}</b></div>
             </div>
             <div class="flip-face flip-back">
               <div class="role">${esc(p.role)}</div>
               <div style="font-size:13px;color:var(--muted)">${esc(p.rank)}</div>
-              <div class="yrs">${p.yrs} yrs</div>
-              <div style="font-size:11px;color:var(--muted)">served with Fine Villa</div>
+              ${p.start? `<div data-countdown="${p.start}"></div><div style="font-size:9.5px;color:var(--muted); margin-top:6px;">served / serving</div>` : `<div style="font-size:12px;color:var(--muted); margin-top:14px;">No one currently assigned</div>`}
             </div>
           </div>
         </div>
@@ -364,16 +481,12 @@ function openLoginModal(role){
   <div class="modal-back" id="loginModal">
     <div class="modal">
       <h3>${PORTAL_META[role].icon} ${PORTAL_META[role].label} Login</h3>
-      <div class="field"><label>Passcode</label><input id="passInput" placeholder="e.g. ${role==='admin'?'owner-4321':role+'-001-XXXX'}" autocomplete="off"></div>
+      <div class="field"><label>Passcode</label><input id="passInput" placeholder="Enter your passcode" autocomplete="off"></div>
       <div id="loginErr" style="color:var(--danger); font-size:12.5px; margin-bottom:10px;"></div>
       <div style="display:flex; gap:10px;">
         <button class="btn3d btn-gold" style="flex:1" id="loginGo">Enter Portal</button>
         <button class="btn3d btn-ghost" id="loginCancel">Cancel</button>
       </div>
-      ${role==='admin'?'<div style="font-size:11px;color:var(--muted);margin-top:12px;">Demo passcode: <span class="pass-chip">owner-4321</span></div>':''}
-      ${role==='agent'?`<div style="font-size:11px;color:var(--muted);margin-top:12px;">Demo passcode: <span class="pass-chip">${DB.agents[0]?.passcode||''}</span></div>`:''}
-      ${role==='caretaker'?`<div style="font-size:11px;color:var(--muted);margin-top:12px;">Demo passcode: <span class="pass-chip">${DB.caretakers[0]?.passcode||''}</span></div>`:''}
-      ${role==='tenant'?`<div style="font-size:11px;color:var(--muted);margin-top:12px;">Demo passcode: <span class="pass-chip">${DB.tenants[0]?.passcode||''}</span></div>`:''}
     </div>
   </div>`;
   document.body.appendChild(body.firstElementChild);
@@ -459,16 +572,57 @@ function renderPortalTab(role, tab){
 function tabProfile(role){
   if(role==='admin'){
     const o=DB.owner;
-    return `<div class="card"><h3>👤 Owner Profile</h3>
-      <div class="row">
-        <div class="field"><label>Full Name</label><input id="p_name" value="${esc(o.name)}"></div>
-        <div class="field"><label>Phone</label><input id="p_phone" value="${esc(o.phone)}"></div>
-      </div>
-      <div class="row">
-        <div class="field"><label>Email</label><input id="p_email" value="${esc(o.email)}"></div>
-        <div class="field"><label>Owner Since</label><input id="p_since" value="${o.since}"></div>
+    return `
+    <div class="card"><h3>👤 Owner Profile</h3>
+      <div class="row" style="align-items:flex-start;">
+        <div style="flex:0 0 100px;">
+          <div class="person-photo">${isImgUrl(o.photo)? `<img src="${esc(o.photo)}">` : `<span>${o.photo||'🧔🏾'}</span>`}</div>
+          <input type="file" accept="image/*" id="p_photo" style="font-size:10px; margin-top:8px;">
+        </div>
+        <div style="flex:1; min-width:220px;">
+          <div class="row">
+            <div class="field"><label>Full Name</label><input id="p_name" value="${esc(o.name)}"></div>
+            <div class="field"><label>Phone</label><input id="p_phone" value="${esc(o.phone)}"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Email</label><input id="p_email" value="${esc(o.email)}"></div>
+            <div class="field"><label>Ownership Start Date</label><input type="date" id="p_start" value="${new Date(o.start).toISOString().slice(0,10)}"></div>
+          </div>
+        </div>
       </div>
       <button class="btn3d btn-gold" id="saveProfile">💾 Save Changes</button>
+    </div>
+
+    <div class="card"><h3>🔁 Hand Over Ownership</h3>
+      <div style="font-size:11.5px;color:var(--muted); margin-bottom:14px;">Transfers the Owner role to a new person (e.g. a successor or family member). ${esc(o.name)} is archived into the history below the moment this happens, and the Home page flip card switches over automatically.</div>
+      <div class="row">
+        <div class="field"><label>Successor Full Name</label><input id="ho_name" placeholder="Full name"></div>
+        <div class="field"><label>Phone</label><input id="ho_phone" placeholder="07XX XXX XXX"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Email</label><input id="ho_email" placeholder="name@email.com"></div>
+        <div class="field"><label>Reason (optional)</label><input id="ho_reason" placeholder="e.g. Retirement, passed to son"></div>
+      </div>
+      <button class="btn3d btn-danger" id="handoverBtn">🔁 Hand Over Ownership</button>
+    </div>
+
+    <div class="card"><h3>🏛️ Ownership History</h3>
+      <div class="cardgrid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
+        <div class="history-card current">
+          <span class="cur-badge">CURRENT</span>
+          <div class="hphoto">${isImgUrl(o.photo)? `<img src="${esc(o.photo)}">` : `<span>${o.photo||'🧔🏾'}</span>`}</div>
+          <b>${esc(o.name)}</b>
+          <span>${fmtDate(o.start).split(',')[0]} — Present</span>
+        </div>
+        ${(DB.ownerHistory||[]).slice().reverse().map(h=>`
+          <div class="history-card">
+            <div class="hphoto">${isImgUrl(h.photo)? `<img src="${esc(h.photo)}">` : `<span>${h.photo||'🧔🏾'}</span>`}</div>
+            <b>${esc(h.name)}</b>
+            <span>${fmtDate(h.start).split(',')[0]} — ${fmtDate(h.end).split(',')[0]}</span>
+            ${h.reason? `<span class="reason">${esc(h.reason)}</span>`:''}
+          </div>
+        `).join('') || '<div style="color:var(--muted); font-size:12.5px;">No previous owners yet.</div>'}
+      </div>
     </div>`;
   }
   if(role==='tenant'){
@@ -491,11 +645,20 @@ function tabProfile(role){
       </div>
     </div>`;
   }
-  const rec = role==='agent'? DB.agents[0] : DB.caretakers[0];
+  const list = role==='agent'? DB.agents : DB.caretakers;
+  const rec = list.find(r=>r.passcode===app.identity.passcode) || app.identity;
   return `<div class="card"><h3>👤 ${PORTAL_META[role].label} Profile</h3>
-    <div class="row"><div><label style="display:block;font-size:11px;color:var(--muted);">Name</label><div style="padding:8px 0;">${esc(rec.name)}</div></div>
-    <div><label style="display:block;font-size:11px;color:var(--muted);">Phone</label><div style="padding:8px 0;">${esc(rec.phone)}</div></div></div>
-    <div style="font-size:11px;color:var(--muted);">Since ${rec.since||''} · Passcode: <span class="pass-chip">${esc(rec.passcode)}</span></div>
+    <div class="row" style="align-items:flex-start;">
+      <div style="flex:0 0 100px;">
+        <div class="person-photo">${isImgUrl(rec.photo)? `<img src="${esc(rec.photo)}">` : `<span>${rec.photo||(role==='agent'?'💼':'🧰')}</span>`}</div>
+        <input type="file" accept="image/*" id="p_photo" style="font-size:10px; margin-top:8px;">
+      </div>
+      <div style="flex:1; min-width:200px;">
+        <div><label style="display:block;font-size:11px;color:var(--muted);">Name</label><div style="padding:8px 0;">${esc(rec.name)}</div></div>
+        <div><label style="display:block;font-size:11px;color:var(--muted);">Phone</label><div style="padding:8px 0;">${esc(rec.phone)}</div></div>
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);">Serving since ${fmtDate(rec.start).split(',')[0]}${rec.active===false?' · <span style="color:var(--danger)">Access revoked</span>':''} · Passcode: <span class="pass-chip">${esc(rec.passcode)}</span></div>
   </div>`;
 }
 
@@ -863,8 +1026,30 @@ function attachPageEvents(){
     DB.owner.name=document.getElementById('p_name').value;
     DB.owner.phone=document.getElementById('p_phone').value;
     DB.owner.email=document.getElementById('p_email').value;
-    DB.owner.since=parseInt(document.getElementById('p_since').value)||DB.owner.since;
+    const sd = document.getElementById('p_start').value;
+    if(sd) DB.owner.start = new Date(sd).getTime();
+    app.identity = { ...DB.owner };
     saveDB(true); render();
+  };
+
+  const pPhoto = document.getElementById('p_photo');
+  if(pPhoto) pPhoto.onchange = (e)=> uploadPersonPhoto(app.portal, e.target.files[0]);
+
+  const handoverBtn = document.getElementById('handoverBtn');
+  if(handoverBtn) handoverBtn.onclick = ()=>{
+    const name = document.getElementById('ho_name').value.trim();
+    const phone = document.getElementById('ho_phone').value.trim();
+    const email = document.getElementById('ho_email').value.trim();
+    const reason = document.getElementById('ho_reason').value.trim();
+    if(!name || !phone){ toast("Enter the successor's name and phone"); return; }
+    if(!confirm(`Hand over ownership to ${name}? ${DB.owner.name} will be archived into history.`)) return;
+    DB.ownerHistory = DB.ownerHistory || [];
+    DB.ownerHistory.push({ ...DB.owner, end:Date.now(), reason: reason || 'Ownership transferred' });
+    const outgoing = DB.owner.name;
+    DB.owner = { name, phone, email, photo:null, start:Date.now() };
+    app.identity = { ...DB.owner };
+    logAudit(name, 'received ownership from', outgoing);
+    saveDB(true); toast('Ownership transferred to '+name); render();
   };
 
   const genBtn = document.getElementById('genBtn');
@@ -878,13 +1063,13 @@ function attachPageEvents(){
       const id = document.getElementById('g_extra').value.trim();
       const seq = DB.agents.length+1;
       const pc = genPass('agt',seq);
-      DB.agents.push({name, id, phone, passcode:pc, since:2026, photo:'💼', active:true});
+      DB.agents.push({name, id, phone, passcode:pc, start:Date.now(), end:null, photo:null, active:true});
       logAudit(actor, 'generated Agent passcode', `${name} → ${pc}`);
     } else if(role==='agent'){
       const email = document.getElementById('g_extra').value.trim();
       const seq = DB.caretakers.length+1;
       const pc = genPass('care',seq);
-      DB.caretakers.push({name, email, phone, passcode:pc, since:2026, photo:'🧰', active:true});
+      DB.caretakers.push({name, email, phone, passcode:pc, start:Date.now(), end:null, photo:null, active:true});
       logAudit(actor, 'generated Caretaker passcode', `${name} → ${pc}`);
     } else if(role==='caretaker'){
       const house = (document.getElementById('g_house').value.trim()||'000').padStart(3,'0');
@@ -900,8 +1085,15 @@ function attachPageEvents(){
     b.onclick = ()=>{
       const role = app.portal; const i = b.dataset.revoke;
       const list = listForRole(role);
-      list[i].active = list[i].active===false ? true : false;
-      logAudit(identityName(), list[i].active? 'restored access for':'revoked access for', list[i].name);
+      const rec = list[i];
+      if(rec.active===false){
+        rec.active = true; rec.end = null;
+        logAudit(identityName(), 'restored access for', rec.name);
+      } else {
+        const reason = prompt(`Reason for revoking ${rec.name}'s access? (optional)`) || '';
+        rec.active = false; rec.end = Date.now(); rec.reason = reason;
+        logAudit(identityName(), 'revoked access for', rec.name + (reason? ' — '+reason : ''));
+      }
       saveDB(true); render();
     };
   });
