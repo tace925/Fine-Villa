@@ -4,6 +4,7 @@
 const SUPABASE_URL = "https://ybqwivcmznzqwxupvjii.supabase.co";
 const SUPABASE_KEY = "sb_publishable_p09ka2D_3bB-gkl_Et-XDQ_I6GosAfG";
 const REST = SUPABASE_URL + "/rest/v1/fv_state";
+const STORAGE_BUCKET = "tour-images";
 const DAY = 86400000;
 let DB = null;
 let app = { page:"home", portal:null, identity:null, portalTab:null, theme:"dark" };
@@ -25,7 +26,7 @@ function seedDB(){
     owner:{name:"Mr. Daniel Kamau", role:"Director / Owner", phone:"0721 404 647", email:"finevillaproperties@gmail.com", since:2016, photo:"🧔🏾"},
     agents:[{name:"Grace Wambui", id:"31245678", phone:"0733 221 044", passcode:"agt-001-4T7Q", since:2021, photo:"👩🏾‍💼", active:true}],
     caretakers:[{name:"Samuel Otieno", phone:"0798 112 233", email:"s.otieno@finevilla.co.ke", passcode:"care-001-9X2M", since:2022, photo:"👨🏿‍🔧", active:true}],
-    tenants:[{no:"134", name:"Telvin Nyinge", phone:"0712 000 134", email:"telvin.nyinge@example.com", passcode:"tent-134-8K1L", house:"134", rentExpected:18670, rentPaid:8670, balance:80761, lastPayment:"2026-06-22"}],
+    tenants:[{no:"134", name:"Telvin Nyinge", phone:"0712 000 134", email:"telvin.nyinge@example.com", passcode:"tent-134-8K1L", house:"134", rentExpected:18670, rentPaid:8670, balance:80761, lastPayment:"2026-06-22", active:true}],
     messages:[
       {id:1, from:"Agent", to:"Admin", subject:"May Occupancy Summary", body:"142 of 200 units occupied. Two vacancies flagged for repainting before listing.", ts:Date.now()-DAY*2, file:null}
     ],
@@ -43,8 +44,8 @@ function seedDB(){
       challenge:"The hardest years were 2018–2020: flooding damaged the lower units twice, and manual paper receipts made it difficult to track who had paid, who hadn't, and which units needed repair. That gap is exactly what this system was built to close.",
       quote:"\u201cHonest is successful \u2014 build the kind of place you'd be proud to hand your own keys to.\u201d",
       gallery:[
-        {label:"Front View", caption:""}, {label:"Side View", caption:""}, {label:"Back View", caption:""},
-        {label:"Compound", caption:""}, {label:"Parking", caption:""}, {label:"Rooftop / Communal Area", caption:""}
+        {label:"Front View", caption:"", url:null}, {label:"Side View", caption:"", url:null}, {label:"Back View", caption:"", url:null},
+        {label:"Compound", caption:"", url:null}, {label:"Parking", caption:"", url:null}, {label:"Rooftop / Communal Area", caption:"", url:null}
       ]
     },
     policies:[
@@ -100,6 +101,35 @@ async function pushDB(){
   }catch(e){
     console.error(e);
     toast("Could not sync to server");
+  }
+}
+
+/* ---------------- Supabase Storage: tour image upload ---------------- */
+async function uploadTourImage(idx, file){
+  if(!file) return;
+  if(!file.type.startsWith('image/')){ toast('Please choose an image file'); return; }
+  if(file.size > 5*1024*1024){ toast('Image is too large — please keep it under 5MB'); return; }
+  toast('Uploading photo…');
+  const safeName = file.name.replace(/[^a-zA-Z0-9.]/g,'-');
+  const path = `slot-${idx}-${Date.now()}-${safeName}`;
+  try{
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${path}`, {
+      method:'POST',
+      headers:{
+        apikey: SUPABASE_KEY,
+        Authorization: 'Bearer '+SUPABASE_KEY,
+        'Content-Type': file.type
+      },
+      body: file
+    });
+    if(!res.ok) throw new Error('Upload failed: '+res.status);
+    const url = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${path}`;
+    DB.tour.gallery[idx].url = url;
+    saveDB(true);
+    render();
+  }catch(e){
+    console.error(e);
+    toast('Upload failed — check that the "tour-images" bucket exists and is public');
   }
 }
 function logAudit(actor, action, detail){
@@ -259,7 +289,11 @@ function pageTour(){
     <div class="sub">A look at the property — plus the story behind it.</div>
     <div class="cardgrid" style="grid-template-columns:repeat(3,1fr);">
       ${DB.tour.gallery.map(g=>`
-        <div class="imgph">📷<br>${esc(g.label)}${g.caption? `<div style="color:var(--ink);font-size:11px;margin-top:4px;">"${esc(g.caption)}"</div>`:''}</div>
+        <div class="imgph ${g.url?'has-img':''}">
+          ${g.url?
+            `<img src="${esc(g.url)}" alt="${esc(g.label)}"><div class="imgcap">${esc(g.label)}${g.caption? ' — "'+esc(g.caption)+'"':''}</div>`
+            : `📷<br>${esc(g.label)}${g.caption? `<div style="color:var(--ink);font-size:11px;margin-top:4px;">"${esc(g.caption)}"</div>`:''}`}
+        </div>
       `).join('')}
     </div>
     <div class="card" style="margin-top:24px;">
@@ -354,7 +388,7 @@ function tryLogin(role){
   if(role==='admin' && val==='owner-4321') identity={ ...DB.owner };
   if(role==='agent') identity = DB.agents.find(a=>a.passcode===val && a.active!==false);
   if(role==='caretaker') identity = DB.caretakers.find(a=>a.passcode===val && a.active!==false);
-  if(role==='tenant') identity = DB.tenants.find(a=>a.passcode===val);
+  if(role==='tenant') identity = DB.tenants.find(a=>a.passcode===val && a.active!==false);
   if(!identity){ document.getElementById('loginErr').textContent='Passcode not recognised (or has been revoked). Please check and try again.'; return; }
   app.portal = role; app.identity = identity; app.page='portal';
   app.portalTab = 'profile';
@@ -395,6 +429,9 @@ function pagePortal(){
 function identityName(){
   if(app.portal==='admin') return DB.owner.name;
   return app.identity?.name || '';
+}
+function listForRole(role){
+  return role==='admin'? DB.agents : role==='agent'? DB.caretakers : DB.tenants;
 }
 function countUnread(role){
   const label = {admin:'Admin', agent:'Agent', caretaker:'Caretaker', tenant:'Tenant'}[role];
@@ -468,7 +505,7 @@ function tabGenerate(role){
   const list = {admin:DB.agents, agent:DB.caretakers, caretaker:DB.tenants}[role];
   const extraField = role==='caretaker' ? `<div class="field"><label>House No. (001–200)</label><input id="g_house" placeholder="e.g. 057"></div>` :
     `<div class="field"><label>${role==='admin'?'ID Number':'Email'}</label><input id="g_extra" placeholder="${role==='admin'?'e.g. 31245678':'name@email.com'}"></div>`;
-  const canRevoke = role==='agent' || role==='admin';
+  const canRevoke = role==='agent' || role==='admin' || role==='caretaker';
   return `
   <div class="card">
     <h3>🔑 Generate ${target} Passcode</h3>
@@ -593,8 +630,11 @@ function tabReport(role){
 
 /* ---------------- ADMIN: AUDIT LOG ---------------- */
 function tabAudit(){
-  return `<div class="card"><h3>🕵️ Audit Log <span style="font-size:11px;color:var(--muted); font-weight:400;">(who generated what, and when)</span></h3>
+  return `<div class="card">
+    <h3>🕵️ Audit Log <span style="font-size:11px;color:var(--muted); font-weight:400;">(who generated what, and when)</span></h3>
+    <div style="font-size:11.5px;color:var(--muted); margin-bottom:14px;">Clearing is meant to happen once, at the end of each month — it wipes this list only, nothing else in the system.</div>
     ${DB.auditLog.map(a=>`<div class="audit-row"><b style="color:var(--ink)">${esc(a.actor)}</b> ${esc(a.action)} — ${esc(a.detail)} <span style="float:right;">${fmtDate(a.ts)}</span></div>`).join('') || '<div style="color:var(--muted);font-size:13px;">No activity logged yet.</div>'}
+    <button class="btn3d btn-danger" id="clearAudit" style="margin-top:16px;">🧹 Clear Audit Log (end of month)</button>
   </div>`;
 }
 
@@ -607,11 +647,21 @@ function tabTourEdit(){
     <div class="field"><label>Inspirational Quote</label><input id="t_quote" value="${esc(DB.tour.quote)}"></div>
     <button class="btn3d btn-gold" id="saveTour" style="margin-top:6px;">💾 Publish to Tour Page</button>
   </div>
-  <div class="card"><h3>📷 Gallery Captions</h3>
-    <div class="row">
-      ${DB.tour.gallery.map((g,i)=>`<div class="field" style="min-width:180px;"><label>${esc(g.label)}</label><input data-cap="${i}" value="${esc(g.caption)}" placeholder="Add a caption..."></div>`).join('')}
+  <div class="card"><h3>📷 Gallery Images</h3>
+    <div style="font-size:11.5px;color:var(--muted); margin-bottom:14px;">Upload a photo for each angle (max 5MB, JPG/PNG). Uploading replaces the placeholder immediately.</div>
+    <div class="cardgrid" style="grid-template-columns:repeat(3,1fr);">
+      ${DB.tour.gallery.map((g,i)=>`
+        <div>
+          <div class="imgph ${g.url?'has-img':''}" style="min-height:120px;">
+            ${g.url? `<img src="${esc(g.url)}" alt="${esc(g.label)}">` : `📷<br>${esc(g.label)}`}
+          </div>
+          <div style="font-size:11px;color:var(--muted); margin:8px 0 4px;">${esc(g.label)}</div>
+          <input type="file" accept="image/*" data-upload="${i}" style="font-size:11px; padding:6px;">
+          <input data-cap="${i}" value="${esc(g.caption)}" placeholder="Caption..." style="margin-top:6px;">
+        </div>
+      `).join('')}
     </div>
-    <button class="btn3d btn-gold" id="saveGallery">💾 Save Captions</button>
+    <button class="btn3d btn-gold" id="saveGallery" style="margin-top:16px;">💾 Save Captions</button>
   </div>`;
 }
 function tabPolicyEdit(){
@@ -702,6 +752,9 @@ function openTenantEditModal(i){
       <div class="field"><label>Rent Expected / Month</label><input id="te_expected" value="${t.rentExpected||0}"></div>
       <div class="field"><label>Balance</label><input id="te_balance" value="${t.balance||0}"></div>
     </div>
+    <div class="row">
+      <div class="field"><label>Last Payment Date</label><input type="date" id="te_lastpayment" value="${esc(t.lastPayment||'')}"></div>
+    </div>
     <div id="tenantEditErr" style="color:var(--danger); font-size:12.5px; margin-bottom:10px;"></div>
     <button class="btn3d btn-gold" id="teSave" style="width:100%; margin-bottom:16px;">💾 Save Details</button>
 
@@ -733,6 +786,7 @@ function openTenantEditModal(i){
     t.email = document.getElementById('te_email').value.trim();
     t.rentExpected = parseFloat(document.getElementById('te_expected').value)||0;
     t.balance = parseFloat(document.getElementById('te_balance').value)||0;
+    t.lastPayment = document.getElementById('te_lastpayment').value || t.lastPayment;
     const h = DB.houses.find(h=>h.no===t.house); if(h) h.tenant = t.name;
     logAudit(identityName(), 'updated tenant record for', `${t.name} (House ${t.house})`);
     saveDB(true);
@@ -835,7 +889,7 @@ function attachPageEvents(){
     } else if(role==='caretaker'){
       const house = (document.getElementById('g_house').value.trim()||'000').padStart(3,'0');
       const pc = `tent-${house}-` + genPass('x',0).split('-')[2];
-      DB.tenants.push({no:house, name, phone, email:'', passcode:pc, house, rentExpected:0, rentPaid:0, balance:0, lastPayment:''});
+      DB.tenants.push({no:house, name, phone, email:'', passcode:pc, house, rentExpected:0, rentPaid:0, balance:0, lastPayment:'', active:true});
       const h = DB.houses.find(h=>h.no===house); if(h){ h.status='occ'; h.tenant=name; }
       logAudit(actor, 'generated Tenant passcode', `${name} (House ${house}) → ${pc}`);
     }
@@ -845,7 +899,7 @@ function attachPageEvents(){
   document.querySelectorAll('[data-revoke]').forEach(b=>{
     b.onclick = ()=>{
       const role = app.portal; const i = b.dataset.revoke;
-      const list = role==='admin'? DB.agents : DB.caretakers;
+      const list = listForRole(role);
       list[i].active = list[i].active===false ? true : false;
       logAudit(identityName(), list[i].active? 'restored access for':'revoked access for', list[i].name);
       saveDB(true); render();
@@ -854,9 +908,15 @@ function attachPageEvents(){
   document.querySelectorAll('[data-regen]').forEach(b=>{
     b.onclick = ()=>{
       const role = app.portal; const i = b.dataset.regen;
-      const list = role==='admin'? DB.agents : DB.caretakers;
-      const prefix = role==='admin'? 'agt':'care';
-      list[i].passcode = genPass(prefix, parseInt(i)+1);
+      const list = listForRole(role);
+      let pc;
+      if(role==='caretaker'){
+        pc = `tent-${list[i].house}-` + genPass('x',0).split('-')[2];
+      } else {
+        const prefix = role==='admin'? 'agt':'care';
+        pc = genPass(prefix, parseInt(i)+1);
+      }
+      list[i].passcode = pc;
       logAudit(identityName(), 'regenerated passcode for', list[i].name);
       saveDB(true); render();
     };
@@ -915,6 +975,9 @@ function attachPageEvents(){
     DB.tour.quote = document.getElementById('t_quote').value;
     saveDB(true); toast('Tour page updated');
   };
+  document.querySelectorAll('[data-upload]').forEach(inp=>{
+    inp.onchange = (e)=> uploadTourImage(parseInt(inp.dataset.upload), e.target.files[0]);
+  });
   const saveGallery = document.getElementById('saveGallery');
   if(saveGallery) saveGallery.onclick = ()=>{
     document.querySelectorAll('[data-cap]').forEach(inp=>{ DB.tour.gallery[inp.dataset.cap].caption = inp.value; });
@@ -972,6 +1035,12 @@ function attachPageEvents(){
     b.onclick = ()=> openTenantEditModal(parseInt(b.dataset.edittenant));
   });
 
+  const clearAudit = document.getElementById('clearAudit');
+  if(clearAudit) clearAudit.onclick = ()=>{
+    if(!confirm('Clear the entire audit log? This cannot be undone — only do this at the end of the month.')) return;
+    DB.auditLog = [];
+    saveDB(true); toast('Audit log cleared'); render();
+  };
   const sendComplaint = document.getElementById('sendComplaint');
   if(sendComplaint) sendComplaint.onclick = ()=>{
     const text = document.getElementById('c_text').value.trim();
