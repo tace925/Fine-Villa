@@ -1,238 +1,39 @@
 /* ============================================================
-   FINE VILLA LIMITED — SYSTEM CORE  (localStorage prototype)
+   FINE VILLA LIMITED — SYSTEM CORE  (real Supabase backend)
+   Auth: Supabase Auth (email + password, invite-based onboarding)
+   Data: relational tables + Row Level Security
    ============================================================ */
+
+// This is the PUBLIC anon key — safe to ship in the browser.
+// It can do nothing on its own; every table is locked down by
+// Row Level Security, and privileged actions (inviting a new
+// person) go through the invite-user Edge Function instead.
 const SUPABASE_URL = "https://ybqwivcmznzqwxupvjii.supabase.co";
-const SUPABASE_KEY = "sb_publishable_p09ka2D_3bB-gkl_Et-XDQ_I6GosAfG";
-const REST = SUPABASE_URL + "/rest/v1/fv_state";
+const SUPABASE_ANON_KEY = "sb_publishable_p09ka2D_3bB-gkl_Et-XDQ_I6GosAfG";
 const STORAGE_BUCKET = "tour-images";
-const DAY = 86400000;
-let DB = null;
-let app = { page:"home", portal:null, identity:null, portalTab:null, theme:"dark" };
 
-function toast(msg){
-  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
-  clearTimeout(window.__toastT); window.__toastT=setTimeout(()=>t.classList.remove('show'),2200);
-}
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-/* ---------------- SEED DATA ---------------- */
-function seedDB(){
-  const houses=[];
-  for(let i=1;i<=200;i++){
-    const no=String(i).padStart(3,'0');
-    const occ = i===134 || i%7===0;
-    houses.push({no, status: occ?'occ':'emp', tenant: i===134? 'Telvin Nyinge' : (occ? 'Tenant '+no : null), maintLog:[], lastInspected:null});
-  }
-  return {
-    owner:{name:"Mr. Daniel Kamau", role:"Director / Owner", phone:"0721 404 647", email:"finevillaproperties@gmail.com", start:new Date('2016-01-01').getTime(), photo:"🧔🏾"},
-    ownerHistory:[],
-    agents:[{name:"Grace Wambui", id:"31245678", phone:"0733 221 044", passcode:"agt-001-4T7Q", start:new Date('2021-03-01').getTime(), end:null, photo:"👩🏾‍💼", active:true}],
-    caretakers:[{name:"Samuel Otieno", phone:"0798 112 233", email:"s.otieno@finevilla.co.ke", passcode:"care-001-9X2M", start:new Date('2022-06-01').getTime(), end:null, photo:"👨🏿‍🔧", active:true}],
-    tenants:[{no:"134", name:"Telvin Nyinge", phone:"0712 000 134", email:"telvin.nyinge@example.com", passcode:"tent-134-8K1L", house:"134", rentExpected:18670, rentPaid:8670, balance:80761, lastPayment:"2026-06-22", active:true}],
-    messages:[
-      {id:1, from:"Agent", to:"Admin", subject:"May Occupancy Summary", body:"142 of 200 units occupied. Two vacancies flagged for repainting before listing.", ts:Date.now()-DAY*2, file:null}
-    ],
-    complaints:[
-      {id:1, tenant:"Telvin Nyinge", house:"134", text:"Kitchen tap has been leaking since Monday.", ts:Date.now()-DAY, status:"open"}
-    ],
-    notices:{
-      global:[{id:1, author:"Admin", text:"Rent for June is due on or before the 5th. Payments after the 10th attract a 10% penalty.", ts:Date.now()-DAY*3, urgency:"important"}],
-      agent:[{id:1, author:"Agent", text:"Site visit scheduled Friday 10am — all caretakers please be present.", ts:Date.now()-DAY, urgency:"normal"}],
-      caretaker:[{id:1, author:"Caretaker", text:"Water tank cleaning this Saturday, expect low pressure 8–11am.", ts:Date.now()-3600000*5, urgency:"important"}],
-      tenant:[{id:1, author:"Caretaker", text:"Garbage collection now happens every Tuesday & Friday.", ts:Date.now()-3600000*10, urgency:"normal"}]
-    },
-    tour:{
-      history:"Fine Villa began in 2016 as a single block of six units off Naivasha Road. What started as one caretaker with a ledger book and a bicycle has grown into a 200-unit residential community across Riruta. The early years meant chasing rent on foot and settling water disputes by torchlight — today the same spirit runs the estate, just with better paperwork.",
-      challenge:"The hardest years were 2018–2020: flooding damaged the lower units twice, and manual paper receipts made it difficult to track who had paid, who hadn't, and which units needed repair. That gap is exactly what this system was built to close.",
-      quote:"\u201cHonest is successful \u2014 build the kind of place you'd be proud to hand your own keys to.\u201d",
-      gallery:[
-        {label:"Front View", caption:"", url:null}, {label:"Side View", caption:"", url:null}, {label:"Back View", caption:"", url:null},
-        {label:"Compound", caption:"", url:null}, {label:"Parking", caption:"", url:null}, {label:"Rooftop / Communal Area", caption:"", url:null}
-      ]
-    },
-    policies:[
-      {title:"Rent Payment", cat:"Payments", body:"Rent is due on or before the 5th of every month. Payment after the 10th attracts a 10% penalty charge and may result in the house being closed pending settlement.", updated:"2026-05-01"},
-      {title:"Water Billing", cat:"Payments", body:"Water is billed per unit consumed at the prevailing rate and must be settled alongside rent to avoid disconnection.", updated:"2026-05-01"},
-      {title:"Deposit & Refunds", cat:"Move-in / Move-out", body:"A one-month deposit is held against damages and is refundable within 30 days of vacating, less any deductions for repairs beyond fair wear and tear.", updated:"2026-01-15"},
-      {title:"Notice to Vacate", cat:"Move-in / Move-out", body:"Tenants must give 30 days' written notice before vacating. Failure to do so may forfeit part of the deposit.", updated:"2026-01-15"},
-      {title:"Maintenance & Repairs", cat:"Maintenance", body:"Tenants must report faults promptly via the Complaints section. Fine Villa targets a 48-hour response for urgent repairs (water, electricity, security).", updated:"2026-04-10"},
-      {title:"Conduct & Noise", cat:"Conduct", body:"Residents are expected to maintain reasonable noise levels after 10pm and to keep shared spaces (corridors, compounds, parking) clear and clean.", updated:"2026-02-20"}
-    ],
-    auditLog:[],
-    houses
-  };
+let DB = null;                 // read-model cache, rebuilt from real tables
+let app = { page: "home", portal: null, profile: null, portalTab: null, theme: "dark", session: null };
+
+function toast(msg) {
+  const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(window.__toastT); window.__toastT = setTimeout(() => t.classList.remove('show'), 2200);
 }
 
-/* ---------------- Supabase load/save ---------------- */
-async function loadDB(){
-  try{
-    const res = await fetch(REST + "?id=eq.1&select=data", {
-      headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + SUPABASE_KEY }
-    });
-    if(!res.ok) throw new Error("Supabase fetch failed: " + res.status);
-    const rows = await res.json();
-    if(rows && rows[0] && rows[0].data && Object.keys(rows[0].data).length){
-      DB = rows[0].data;
-    } else {
-      DB = seedDB();
-      await pushDB();
-    }
-  }catch(e){
-    console.error(e);
-    toast("Could not reach the server — working offline for now");
-    DB = seedDB();
-  }
-  normalizeDB();
-  pushDB();
-}
-
-// Backfills any fields that didn't exist yet when this data was last saved
-// (e.g. older records saved before "start/end" timestamps or photos were
-// introduced), so older saved data never crashes newer code.
-function normalizeDB(){
-  const seed = seedDB();
-  if(!DB.owner) DB.owner = seed.owner;
-  if(!DB.owner.start){
-    DB.owner.start = DB.owner.since ? new Date(DB.owner.since, 0, 1).getTime() : Date.now();
-  }
-  if(DB.owner.photo===undefined) DB.owner.photo = seed.owner.photo;
-  if(!DB.ownerHistory) DB.ownerHistory = [];
-
-  ['agents','caretakers'].forEach(key=>{
-    if(!Array.isArray(DB[key])) DB[key]=[];
-    DB[key].forEach(r=>{
-      if(!r.start){ r.start = r.since ? new Date(r.since, 0, 1).getTime() : Date.now(); }
-      if(r.end===undefined) r.end = null;
-      if(r.active===undefined) r.active = true;
-      if(r.photo===undefined) r.photo = null;
-    });
-  });
-  if(!Array.isArray(DB.tenants)) DB.tenants=[];
-  DB.tenants.forEach(t=>{
-    if(t.active===undefined) t.active = true;
-    if(t.rentExpected===undefined) t.rentExpected = 0;
-    if(t.rentPaid===undefined) t.rentPaid = 0;
-    if(t.balance===undefined) t.balance = 0;
-  });
-  if(!DB.tour) DB.tour = seed.tour;
-  if(!Array.isArray(DB.tour.gallery)) DB.tour.gallery = seed.tour.gallery;
-  DB.tour.gallery.forEach(g=>{ if(g.url===undefined) g.url=null; });
-  if(!Array.isArray(DB.policies)) DB.policies = seed.policies;
-  if(!Array.isArray(DB.auditLog)) DB.auditLog = [];
-  if(!Array.isArray(DB.messages)) DB.messages = [];
-  if(!Array.isArray(DB.complaints)) DB.complaints = [];
-  if(!Array.isArray(DB.houses) || DB.houses.length!==200) DB.houses = seed.houses;
-  if(!DB.notices) DB.notices = seed.notices;
-  ['global','agent','caretaker','tenant'].forEach(b=>{ if(!Array.isArray(DB.notices[b])) DB.notices[b]=[]; });
-}
-function saveDB(showToast){
-  pushDB();
-  if(showToast) toast("Saved");
-}
-async function pushDB(){
-  try{
-    const res = await fetch(REST + "?id=eq.1", {
-      method: "PATCH",
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: "Bearer " + SUPABASE_KEY,
-        "Content-Type": "application/json",
-        Prefer: "return=minimal"
-      },
-      body: JSON.stringify({ data: DB, updated_at: new Date().toISOString() })
-    });
-    if(!res.ok) throw new Error("Supabase save failed: " + res.status);
-  }catch(e){
-    console.error(e);
-    toast("Could not sync to server");
-  }
-}
-
-/* ---------------- Supabase Storage: tour image upload ---------------- */
-async function uploadTourImage(idx, file){
-  if(!file) return;
-  if(!file.type.startsWith('image/')){ toast('Please choose an image file'); return; }
-  if(file.size > 5*1024*1024){ toast('Image is too large — please keep it under 5MB'); return; }
-  toast('Uploading photo…');
-  const safeName = file.name.replace(/[^a-zA-Z0-9.]/g,'-');
-  const path = `slot-${idx}-${Date.now()}-${safeName}`;
-  try{
-    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${path}`, {
-      method:'POST',
-      headers:{
-        apikey: SUPABASE_KEY,
-        Authorization: 'Bearer '+SUPABASE_KEY,
-        'Content-Type': file.type
-      },
-      body: file
-    });
-    if(!res.ok) throw new Error('Upload failed: '+res.status);
-    const url = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${path}`;
-    DB.tour.gallery[idx].url = url;
-    saveDB(true);
-    render();
-  }catch(e){
-    console.error(e);
-    toast('Upload failed — check that the "tour-images" bucket exists and is public');
-  }
-}
-
-async function uploadPersonPhoto(role, file){
-  if(!file) return;
-  if(!file.type.startsWith('image/')){ toast('Please choose an image file'); return; }
-  if(file.size > 5*1024*1024){ toast('Image is too large — please keep it under 5MB'); return; }
-  toast('Uploading photo…');
-  const safeName = file.name.replace(/[^a-zA-Z0-9.]/g,'-');
-  const path = `people/${role}-${Date.now()}-${safeName}`;
-  try{
-    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${path}`, {
-      method:'POST',
-      headers:{ apikey: SUPABASE_KEY, Authorization: 'Bearer '+SUPABASE_KEY, 'Content-Type': file.type },
-      body: file
-    });
-    if(!res.ok) throw new Error('Upload failed: '+res.status);
-    const url = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${path}`;
-    if(role==='admin'){
-      DB.owner.photo = url;
-      app.identity = { ...DB.owner };
-    } else {
-      const list = role==='agent'? DB.agents : DB.caretakers;
-      const rec = list.find(r=>r.passcode===app.identity.passcode);
-      if(rec){ rec.photo = url; app.identity = { ...rec }; }
-    }
-    saveDB(true); render();
-  }catch(e){
-    console.error(e);
-    toast('Upload failed — check that the "tour-images" bucket exists and is public');
-  }
-}
-function logAudit(actor, action, detail){
-  DB.auditLog.unshift({id:Date.now(), actor, action, detail, ts:Date.now()});
-  if(DB.auditLog.length>200) DB.auditLog.length=200;
-}
-
-/* ---------------- utilities ---------------- */
+/* ---------------- utilities (unchanged from before) ---------------- */
 function esc(s){return (s||'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function fmtDate(ts){ return new Date(ts).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
+function fmtDate(ts){ if(!ts) return '—'; return new Date(ts).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
 function money(n){ return 'Kshs ' + (n||0).toLocaleString(); }
-function genPass(prefix, seq){
-  const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let s=''; for(let i=0;i<4;i++) s+=chars[Math.floor(Math.random()*chars.length)];
-  return `${prefix}-${String(seq).padStart(3,'0')}-${s}`;
-}
 function downloadBlob(content, filename, mime){
   const blob = new Blob([content], {type:mime});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; a.click();
   URL.revokeObjectURL(a.href);
 }
-function toCSV(rows){
-  return rows.map(r=>r.map(c=>`"${(c??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
-}
-function notExpired(n){ return (Date.now() - n.ts) < DAY*30; }
+function toCSV(rows){ return rows.map(r=>r.map(c=>`"${(c??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n'); }
+function notExpired(n){ return !n.expires_at || new Date(n.expires_at).getTime() > Date.now(); }
 function isImgUrl(p){ return typeof p==='string' && p.indexOf('http')===0; }
-function getCurrent(list){
-  const actives = (list||[]).filter(x=>x.active!==false).sort((a,b)=>(b.start||0)-(a.start||0));
-  return actives[0] || null;
-}
 function formatDuration(ms){
   if(ms<0) ms=0;
   let sec = Math.floor(ms/1000);
@@ -258,7 +59,6 @@ function startCountdowns(){
   tick();
   window.__cdInt = setInterval(tick, 1000);
 }
-
 function svgDonut(occ, empty){
   const total=occ+empty || 1; const pct=occ/total; const r=52, c=2*Math.PI*r;
   return `<svg viewBox="0 0 140 140" width="140" height="140">
@@ -282,17 +82,222 @@ function svgBars(data, w=280, h=140){
   }).join('');
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}">${bars}</svg>`;
 }
+const ROLE_LABEL = { owner:'Admin', agent:'Agent', caretaker:'Caretaker', tenant:'Tenant' };
 
 /* ============================================================
-   RENDER: PAGE ROUTER
+   DATA LOADING — rebuilds the DB read-model from real tables
+   ============================================================ */
+async function loadAll(){
+  const [
+    profilesR, accountsR, housesR, maintR, messagesR, noticesR,
+    complaintsR, policiesR, tourR, galleryR, auditR, historyR
+  ] = await Promise.all([
+    sb.from('profiles').select('*'),
+    sb.from('tenant_accounts').select('*'),
+    sb.from('houses').select('*').order('no'),
+    sb.from('maintenance_log').select('*').order('created_at', {ascending:false}),
+    sb.from('messages').select('*').order('created_at', {ascending:true}),
+    sb.from('notices').select('*').order('created_at', {ascending:true}),
+    sb.from('complaints').select('*').order('created_at', {ascending:true}),
+    sb.from('policies').select('*'),
+    sb.from('tour_content').select('*').eq('id',1).maybeSingle(),
+    sb.from('tour_gallery').select('*').order('slot'),
+    sb.from('audit_log').select('*').order('created_at', {ascending:false}).limit(200),
+    sb.from('owner_history').select('*').order('start_date', {ascending:true}),
+  ]);
+
+  [profilesR, accountsR, housesR, maintR, messagesR, noticesR, complaintsR, policiesR, tourR, galleryR, auditR, historyR]
+    .forEach(r => { if (r.error) console.error(r.error); });
+
+  const profiles = profilesR.data || [];
+  const accounts = accountsR.data || [];
+  const byId = Object.fromEntries(profiles.map(p => [p.id, p]));
+
+  const owner = profiles.find(p => p.role === 'owner') || null;
+  const agents = profiles.filter(p => p.role === 'agent').map(mapPerson);
+  const caretakers = profiles.filter(p => p.role === 'caretaker').map(mapPerson);
+  const tenants = profiles.filter(p => p.role === 'tenant').map(p => {
+    const acc = accounts.find(a => a.tenant_id === p.id) || {};
+    return {
+      id: p.id, name: p.name, phone: p.phone, email: p.email, house: p.house_no,
+      rentExpected: acc.rent_expected || 0, rentPaid: acc.rent_paid || 0,
+      balance: acc.balance || 0, lastPayment: acc.last_payment, active: p.active,
+    };
+  });
+
+  const houses = (housesR.data || []).map(h => ({
+    no: h.no, status: h.status,
+    tenant: h.tenant_id ? (byId[h.tenant_id]?.name || null) : null,
+    lastInspected: h.last_inspected,
+    maintLog: (maintR.data || []).filter(m => m.house_no === h.no).map(m => ({ id:m.id, text:m.note, ts:new Date(m.created_at).getTime() })),
+  }));
+
+  const messages = (messagesR.data || []).map(m => ({
+    id: m.id,
+    from: ROLE_LABEL[byId[m.from_id]?.role] || 'Unknown',
+    to: ROLE_LABEL[m.to_role],
+    to_role: m.to_role, to_id: m.to_id, from_id: m.from_id,
+    subject: m.subject, body: m.body, file: m.file_path, ts: new Date(m.created_at).getTime(),
+  }));
+
+  const notices = { global: [], agent: [], caretaker: [], tenant: [] };
+  (noticesR.data || []).forEach(n => {
+    notices[n.board].push({
+      id: n.id, author: ROLE_LABEL[byId[n.author_id]?.role] || 'Unknown',
+      text: n.text, ts: new Date(n.created_at).getTime(),
+      expires_at: n.expires_at, urgency: n.urgency,
+    });
+  });
+
+  const complaints = (complaintsR.data || []).map(c => ({
+    id: c.id, tenant: byId[c.tenant_id]?.name || 'Unknown', house: c.house_no,
+    text: c.text, status: c.status, ts: new Date(c.created_at).getTime(), tenant_id: c.tenant_id,
+  }));
+
+  const policies = (policiesR.data || []).map(p => ({
+    id: p.id, title: p.title, cat: p.category, body: p.body, updated: (p.updated_at||'').slice(0,10),
+  }));
+
+  const tour = {
+    history: tourR.data?.history || '', challenge: tourR.data?.challenge || '', quote: tourR.data?.quote || '',
+    gallery: (galleryR.data || []).map(g => ({ slot:g.slot, label:g.label, caption:g.caption||'', url:g.url })),
+  };
+
+  const auditLog = (auditR.data || []).map(a => ({
+    id: a.id, actor: byId[a.actor_id]?.name || 'System', action: a.action, detail: a.detail, ts: new Date(a.created_at).getTime(),
+  }));
+
+  const ownerHistory = (historyR.data || []).map(h => ({
+    name: h.name, phone: h.phone, email: h.email, photo: h.photo_url,
+    start: new Date(h.start_date).getTime(), end: new Date(h.end_date).getTime(), reason: h.reason,
+  }));
+
+  DB = {
+    owner: owner ? mapPerson(owner) : { name:'Vacant', phone:'', email:'', photo:null, start:Date.now() },
+    ownerHistory, agents, caretakers, tenants, houses, messages, notices, complaints, policies, tour, auditLog,
+  };
+}
+function mapPerson(p){
+  return { id:p.id, name:p.name, phone:p.phone, email:p.email, id: p.id_number, photo: p.photo_url,
+    start: new Date(p.start_date).getTime(), end: p.end_date ? new Date(p.end_date).getTime() : null,
+    active: p.active, passcode: null, house: p.house_no };
+}
+async function refresh(){ await loadAll(); render(); }
+
+/* ============================================================
+   AUTH
+   ============================================================ */
+async function boot(){
+  // If the URL contains an invite/recovery hash, Supabase's client
+  // auto-detects it and creates a session — we then force a "set password" step.
+  const hash = window.location.hash;
+  const isInviteLink = hash.includes('type=invite') || hash.includes('type=recovery');
+
+  const { data: { session } } = await sb.auth.getSession();
+  app.session = session;
+
+  if (session) await loadProfileForSession();
+
+  initChrome();
+
+  if (isInviteLink && session) {
+    showSetPasswordModal();
+    history.replaceState(null, '', window.location.pathname); // clean the URL
+  }
+
+  sb.auth.onAuthStateChange(async (event, session) => {
+    app.session = session;
+    if (session) await loadProfileForSession(); else { app.profile = null; app.portal = null; }
+    if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') render();
+  });
+
+  await loadAll();
+  render();
+}
+async function loadProfileForSession(){
+  const { data } = await sb.from('profiles').select('*').eq('id', app.session.user.id).maybeSingle();
+  app.profile = data;
+  app.portal = data ? data.role : null;
+  if (data) app.portalTab = 'profile';
+}
+function identityName(){ return app.profile?.name || ''; }
+
+/* ---------------- login modal (real email+password) ---------------- */
+function openLoginModal(){
+  const body = document.createElement('div');
+  body.innerHTML = `
+  <div class="modal-back" id="loginModal">
+    <div class="modal">
+      <h3>🔐 Sign In</h3>
+      <div class="field"><label>Email</label><input id="li_email" placeholder="you@email.com" autocomplete="username"></div>
+      <div class="field"><label>Password</label><input id="li_pass" type="password" placeholder="Password" autocomplete="current-password"></div>
+      <div id="loginErr" style="color:var(--danger); font-size:12.5px; margin-bottom:10px;"></div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn3d btn-gold" style="flex:1" id="loginGo">Sign In</button>
+        <button class="btn3d btn-ghost" id="loginCancel">Cancel</button>
+      </div>
+      <a class="help-link" id="forgotLink" style="margin-top:12px; display:inline-block;">Forgot your password?</a>
+    </div>
+  </div>`;
+  document.body.appendChild(body.firstElementChild);
+  document.getElementById('loginCancel').onclick = ()=> document.getElementById('loginModal').remove();
+  document.getElementById('loginGo').onclick = doLogin;
+  document.getElementById('li_pass').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+  document.getElementById('forgotLink').onclick = async ()=>{
+    const email = document.getElementById('li_email').value.trim();
+    if(!email){ document.getElementById('loginErr').textContent = 'Enter your email first, then tap "Forgot password?"'; return; }
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + window.location.pathname });
+    document.getElementById('loginErr').style.color = 'var(--ok)';
+    document.getElementById('loginErr').textContent = error ? error.message : 'Reset link sent — check your email.';
+  };
+  document.getElementById('li_email').focus();
+}
+async function doLogin(){
+  const email = document.getElementById('li_email').value.trim();
+  const password = document.getElementById('li_pass').value;
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) { document.getElementById('loginErr').textContent = error.message; return; }
+  document.getElementById('loginModal').remove();
+  closeMenu();
+  app.page = 'portal';
+  render();
+}
+function showSetPasswordModal(){
+  const body = document.createElement('div');
+  body.innerHTML = `
+  <div class="modal-back" id="setPassModal">
+    <div class="modal">
+      <h3>🔑 Set Your Password</h3>
+      <div style="font-size:12.5px;color:var(--muted); margin-bottom:12px;">Welcome to Fine Villa. Choose a password for future sign-ins.</div>
+      <div class="field"><label>New Password</label><input id="sp_pass" type="password" placeholder="At least 8 characters"></div>
+      <div class="field"><label>Confirm Password</label><input id="sp_pass2" type="password" placeholder="Repeat password"></div>
+      <div id="spErr" style="color:var(--danger); font-size:12.5px; margin-bottom:10px;"></div>
+      <button class="btn3d btn-gold" style="width:100%;" id="spGo">Save & Continue</button>
+    </div>
+  </div>`;
+  document.body.appendChild(body.firstElementChild);
+  document.getElementById('spGo').onclick = async ()=>{
+    const p1 = document.getElementById('sp_pass').value, p2 = document.getElementById('sp_pass2').value;
+    if(p1.length < 8){ document.getElementById('spErr').textContent = 'Use at least 8 characters.'; return; }
+    if(p1 !== p2){ document.getElementById('spErr').textContent = 'Passwords do not match.'; return; }
+    const { error } = await sb.auth.updateUser({ password: p1 });
+    if(error){ document.getElementById('spErr').textContent = error.message; return; }
+    document.getElementById('setPassModal').remove();
+    toast('Password set — you\'re in.');
+    app.page = 'portal'; render();
+  };
+}
+
+/* ============================================================
+   RENDER: PAGE ROUTER  (mostly unchanged from the original)
    ============================================================ */
 function render(){
   document.body.setAttribute('data-theme', app.theme || 'dark');
   document.querySelectorAll('#pillnav .btn3d').forEach(b=>b.classList.toggle('active', b.dataset.page===app.page));
   const main = document.getElementById('mainWrap');
+  if (!DB) { main.innerHTML = `<div style="padding:80px 0; text-align:center; color:var(--muted);">Loading…</div>`; return; }
   document.getElementById('stOcc').textContent = DB.houses.filter(h=>h.status==='occ').length;
 
-  // session chip
   const chip = document.getElementById('sessionChip');
   const menuSession = document.getElementById('menuSession');
   if(app.portal){
@@ -308,7 +313,7 @@ function render(){
     else if(app.page==='tour') main.innerHTML = pageTour();
     else if(app.page==='policies') main.innerHTML = pagePolicies();
     else if(app.page==='notices') main.innerHTML = pageNotices();
-    else if(app.page==='portal') main.innerHTML = pagePortal();
+    else if(app.page==='portal') main.innerHTML = app.portal ? pagePortal() : pageSignInPrompt();
   }catch(e){
     console.error('Render error:', e);
     main.innerHTML = `<div class="card" style="margin-top:30px;">
@@ -316,25 +321,28 @@ function render(){
       <div style="color:var(--muted); font-size:13px; margin-bottom:14px;">${esc(e.message)}</div>
       <button class="btn3d btn-gold" id="reloadBtn">Reload</button>
     </div>`;
-    const rb = document.getElementById('reloadBtn');
-    if(rb) rb.onclick = ()=> location.reload();
+    document.getElementById('reloadBtn').onclick = ()=> location.reload();
     return;
   }
 
   attachPageEvents();
-
-  // Tie the typing animation and countdowns to the elements actually on
-  // screen right now, so they never run against a detached/replaced node.
   if(app.page==='home'){ startTyping(); startCountdowns(); }
   else { clearInterval(window.__typeInt); clearInterval(window.__cdInt); }
+}
+function pageSignInPrompt(){
+  return `<div class="card" style="margin-top:30px; text-align:center;">
+    <h3>🔐 Please Sign In</h3>
+    <p style="color:var(--muted); font-size:13.5px;">Use the menu to sign in to your portal.</p>
+    <button class="btn3d btn-gold" id="promptSignIn">Sign In</button>
+  </div>`;
 }
 
 /* ---------------- HOME ---------------- */
 function pageHome(){
   const occ = DB.houses.filter(h=>h.status==='occ').length, total=DB.houses.length;
-  const pct = Math.round(occ/total*100);
-  const curAgent = getCurrent(DB.agents);
-  const curCaretaker = getCurrent(DB.caretakers);
+  const pct = total ? Math.round(occ/total*100) : 0;
+  const curAgent = DB.agents.filter(a=>a.active).sort((a,b)=>b.start-a.start)[0];
+  const curCaretaker = DB.caretakers.filter(a=>a.active).sort((a,b)=>b.start-a.start)[0];
   const people = [
     {role:'Owner', name:DB.owner.name, photo:DB.owner.photo, rank:'Director / Owner', start:DB.owner.start},
     {role:'Agent', name: curAgent? curAgent.name : 'Currently Vacant', photo: curAgent? (curAgent.photo||'💼') : '💼', rank:'Managing Agent', start: curAgent? curAgent.start : null},
@@ -381,21 +389,10 @@ function pageHome(){
     <div class="sub">Born from a stack of hand-written receipts and water bills.</div>
     <div class="card" style="display:flex; gap:20px; flex-wrap:wrap; align-items:center;">
       <div style="flex:1; min-width:240px;">
-        <p style="color:var(--muted); line-height:1.7; font-size:14px;">Every month, tenants received a torn slip of paper for rent and another for water — easy to lose, hard to reconcile, and impossible for an owner to audit from a distance. Fine Villa's digital ledger keeps every receipt, notice and complaint in one place, visible to exactly the people who need it: the owner, the agent, the caretaker, and the tenant.</p>
-      </div>
-      <div class="ticket" style="flex:1; min-width:240px;">
-        <span class="refno">Ref No. 14922</span>
-        <div style="font-size:11px;color:var(--muted); text-transform:uppercase; letter-spacing:1px;">Received From</div>
-        <div style="font-family:var(--serif); font-size:18px; margin:4px 0 10px;">Telvin Nyinge — Hse 134</div>
-        <div style="font-size:11px;color:var(--muted); text-transform:uppercase; letter-spacing:1px;">Being Payment For</div>
-        <div style="margin-bottom:10px;">May Rent</div>
-        <div style="display:flex;justify-content:space-between;font-size:13px;">
-          <span>Balance</span><b style="color:var(--gold-soft)">Kshs 80,761</b>
-        </div>
+        <p style="color:var(--muted); line-height:1.7; font-size:14px;">Every month, tenants received a torn slip of paper for rent and another for water — easy to lose, hard to reconcile, and impossible for an owner to audit from a distance. Fine Villa's digital ledger keeps every receipt, notice and complaint in one place, visible to exactly the people who need it.</p>
       </div>
     </div>
-  </section>
-  `;
+  </section>`;
 }
 
 /* ---------------- TOUR ---------------- */
@@ -413,14 +410,8 @@ function pageTour(){
         </div>
       `).join('')}
     </div>
-    <div class="card" style="margin-top:24px;">
-      <h3>🏛️ Our History</h3>
-      <p style="color:var(--muted); line-height:1.7; font-size:14px;">${esc(DB.tour.history)}</p>
-    </div>
-    <div class="card">
-      <h3>⚠️ Challenges We've Faced</h3>
-      <p style="color:var(--muted); line-height:1.7; font-size:14px;">${esc(DB.tour.challenge)}</p>
-    </div>
+    <div class="card" style="margin-top:24px;"><h3>🏛️ Our History</h3><p style="color:var(--muted); line-height:1.7; font-size:14px;">${esc(DB.tour.history)}</p></div>
+    <div class="card"><h3>⚠️ Challenges We've Faced</h3><p style="color:var(--muted); line-height:1.7; font-size:14px;">${esc(DB.tour.challenge)}</p></div>
     <div class="quote">${esc(DB.tour.quote)}</div>
     <div style="font-size:11px;color:var(--muted); margin-top:16px;">Content in this section is managed by the Agent Portal → Tour tab.</div>
   </section>`;
@@ -466,60 +457,20 @@ function pageNotices(){
 }
 
 /* ============================================================
-   PORTAL LOGIN
+   PORTAL SHELL
    ============================================================ */
 const PORTAL_META = {
-  admin:{label:'Owner / Admin', icon:'🗝️'},
+  owner:{label:'Owner / Admin', icon:'🗝️'},
   agent:{label:'Agent', icon:'💼'},
   caretaker:{label:'Caretaker', icon:'🧰'},
   tenant:{label:'Tenant', icon:'🏘️'}
 };
-
-function openLoginModal(role){
-  const body = document.createElement('div');
-  body.innerHTML = `
-  <div class="modal-back" id="loginModal">
-    <div class="modal">
-      <h3>${PORTAL_META[role].icon} ${PORTAL_META[role].label} Login</h3>
-      <div class="field"><label>Passcode</label><input id="passInput" placeholder="Enter your passcode" autocomplete="off"></div>
-      <div id="loginErr" style="color:var(--danger); font-size:12.5px; margin-bottom:10px;"></div>
-      <div style="display:flex; gap:10px;">
-        <button class="btn3d btn-gold" style="flex:1" id="loginGo">Enter Portal</button>
-        <button class="btn3d btn-ghost" id="loginCancel">Cancel</button>
-      </div>
-    </div>
-  </div>`;
-  document.body.appendChild(body.firstElementChild);
-  document.getElementById('loginCancel').onclick = ()=> document.getElementById('loginModal').remove();
-  document.getElementById('loginGo').onclick = ()=> tryLogin(role);
-  document.getElementById('passInput').addEventListener('keydown', e=>{ if(e.key==='Enter') tryLogin(role); });
-  document.getElementById('passInput').focus();
-}
-function tryLogin(role){
-  const val = document.getElementById('passInput').value.trim();
-  let identity=null;
-  if(role==='admin' && val==='owner-4321') identity={ ...DB.owner };
-  if(role==='agent') identity = DB.agents.find(a=>a.passcode===val && a.active!==false);
-  if(role==='caretaker') identity = DB.caretakers.find(a=>a.passcode===val && a.active!==false);
-  if(role==='tenant') identity = DB.tenants.find(a=>a.passcode===val && a.active!==false);
-  if(!identity){ document.getElementById('loginErr').textContent='Passcode not recognised (or has been revoked). Please check and try again.'; return; }
-  app.portal = role; app.identity = identity; app.page='portal';
-  app.portalTab = 'profile';
-  document.getElementById('loginModal').remove();
-  closeMenu();
-  render();
-}
-
-/* ============================================================
-   PORTAL SHELL
-   ============================================================ */
 const PORTAL_TABS = {
-  admin:[['profile','👤 Profile'],['generate','🔑 Generate Agent'],['received','📥 Received'],['send','📤 Send'],['notices','📣 Notices'],['report','📊 Report'],['audit','🕵️ Audit Log']],
-  agent:[['profile','👤 Profile'],['generate','🔑 Generate Caretaker'],['tour','🗺️ Tour'],['policy','📄 Policies'],['received','📥 Received'],['send','📤 Send'],['notices','📣 Notices'],['report','📊 Report']],
-  caretaker:[['profile','👤 Profile'],['generate','🔑 Generate Tenant'],['status','🏘️ House Status'],['received','📥 Received'],['send','📤 Send'],['tenants','🧾 Tenants'],['notices','📣 Notices'],['complaints','⚠️ Complaints'],['report','📊 Report']],
+  owner:[['profile','👤 Profile'],['generate','🔑 Invite Agent'],['received','📥 Received'],['send','📤 Send'],['notices','📣 Notices'],['report','📊 Report'],['audit','🕵️ Audit Log']],
+  agent:[['profile','👤 Profile'],['generate','🔑 Invite Caretaker'],['tour','🗺️ Tour'],['policy','📄 Policies'],['received','📥 Received'],['send','📤 Send'],['notices','📣 Notices'],['report','📊 Report']],
+  caretaker:[['profile','👤 Profile'],['generate','🔑 Invite Tenant'],['status','🏘️ House Status'],['received','📥 Received'],['send','📤 Send'],['tenants','🧾 Tenants'],['notices','📣 Notices'],['complaints','⚠️ Complaints'],['report','📊 Report']],
   tenant:[['profile','👤 Profile'],['received','📥 Received'],['send','📤 Send'],['complaints','⚠️ Complain'],['notices','📣 Notices'],['report','📊 Report']]
 };
-
 function pagePortal(){
   const role = app.portal; const meta = PORTAL_META[role];
   const tabs = PORTAL_TABS[role];
@@ -539,19 +490,10 @@ function pagePortal(){
     <div id="portalBody">${renderPortalTab(role, app.portalTab)}</div>
   </div>`;
 }
-function identityName(){
-  if(app.portal==='admin') return DB.owner.name;
-  return app.identity?.name || '';
-}
-function listForRole(role){
-  return role==='admin'? DB.agents : role==='agent'? DB.caretakers : DB.tenants;
-}
 function countUnread(role){
-  const label = {admin:'Admin', agent:'Agent', caretaker:'Caretaker', tenant:'Tenant'}[role];
+  const label = ROLE_LABEL[role];
   return DB.messages.filter(m=>m.to===label).length;
 }
-
-/* ---------------- TAB DISPATCH ---------------- */
 function renderPortalTab(role, tab){
   if(tab==='profile') return tabProfile(role);
   if(tab==='generate') return tabGenerate(role);
@@ -570,7 +512,7 @@ function renderPortalTab(role, tab){
 
 /* ---------------- PROFILE ---------------- */
 function tabProfile(role){
-  if(role==='admin'){
+  if(role==='owner'){
     const o=DB.owner;
     return `
     <div class="card"><h3>👤 Owner Profile</h3>
@@ -584,41 +526,22 @@ function tabProfile(role){
             <div class="field"><label>Full Name</label><input id="p_name" value="${esc(o.name)}"></div>
             <div class="field"><label>Phone</label><input id="p_phone" value="${esc(o.phone)}"></div>
           </div>
-          <div class="row">
-            <div class="field"><label>Email</label><input id="p_email" value="${esc(o.email)}"></div>
-            <div class="field"><label>Ownership Start Date</label><input type="date" id="p_start" value="${new Date(o.start).toISOString().slice(0,10)}"></div>
-          </div>
+          <div style="font-size:11px;color:var(--muted);">Email (sign-in ID, contact support to change): ${esc(o.email||'')}</div>
         </div>
       </div>
-      <button class="btn3d btn-gold" id="saveProfile">💾 Save Changes</button>
+      <button class="btn3d btn-gold" id="saveProfile" style="margin-top:12px;">💾 Save Changes</button>
     </div>
-
-    <div class="card"><h3>🔁 Hand Over Ownership</h3>
-      <div style="font-size:11.5px;color:var(--muted); margin-bottom:14px;">Transfers the Owner role to a new person (e.g. a successor or family member). ${esc(o.name)} is archived into the history below the moment this happens, and the Home page flip card switches over automatically.</div>
-      <div class="row">
-        <div class="field"><label>Successor Full Name</label><input id="ho_name" placeholder="Full name"></div>
-        <div class="field"><label>Phone</label><input id="ho_phone" placeholder="07XX XXX XXX"></div>
-      </div>
-      <div class="row">
-        <div class="field"><label>Email</label><input id="ho_email" placeholder="name@email.com"></div>
-        <div class="field"><label>Reason (optional)</label><input id="ho_reason" placeholder="e.g. Retirement, passed to son"></div>
-      </div>
-      <button class="btn3d btn-danger" id="handoverBtn">🔁 Hand Over Ownership</button>
-    </div>
-
     <div class="card"><h3>🏛️ Ownership History</h3>
       <div class="cardgrid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
         <div class="history-card current">
           <span class="cur-badge">CURRENT</span>
           <div class="hphoto">${isImgUrl(o.photo)? `<img src="${esc(o.photo)}">` : `<span>${o.photo||'🧔🏾'}</span>`}</div>
-          <b>${esc(o.name)}</b>
-          <span>${fmtDate(o.start).split(',')[0]} — Present</span>
+          <b>${esc(o.name)}</b><span>${fmtDate(o.start).split(',')[0]} — Present</span>
         </div>
         ${(DB.ownerHistory||[]).slice().reverse().map(h=>`
           <div class="history-card">
             <div class="hphoto">${isImgUrl(h.photo)? `<img src="${esc(h.photo)}">` : `<span>${h.photo||'🧔🏾'}</span>`}</div>
-            <b>${esc(h.name)}</b>
-            <span>${fmtDate(h.start).split(',')[0]} — ${fmtDate(h.end).split(',')[0]}</span>
+            <b>${esc(h.name)}</b><span>${fmtDate(h.start).split(',')[0]} — ${fmtDate(h.end).split(',')[0]}</span>
             ${h.reason? `<span class="reason">${esc(h.reason)}</span>`:''}
           </div>
         `).join('') || '<div style="color:var(--muted); font-size:12.5px;">No previous owners yet.</div>'}
@@ -626,7 +549,8 @@ function tabProfile(role){
     </div>`;
   }
   if(role==='tenant'){
-    const t=app.identity;
+    const t = DB.tenants.find(t=>t.id===app.profile.id);
+    if(!t) return '<div class="card">Loading…</div>';
     const bal = t.balance||0, exp=t.rentExpected||0, paid=t.rentPaid||0;
     return `
     <div class="card"><h3>👤 Tenant Profile <span style="font-size:11px;color:var(--muted); font-weight:400;">(editable only by Caretaker)</span></h3>
@@ -634,7 +558,6 @@ function tabProfile(role){
       <div><label style="display:block;font-size:11px;color:var(--muted);">House No.</label><div style="padding:8px 0;">${esc(t.house)}</div></div></div>
       <div class="row"><div><label style="display:block;font-size:11px;color:var(--muted);">Phone</label><div style="padding:8px 0;">${esc(t.phone)}</div></div>
       <div><label style="display:block;font-size:11px;color:var(--muted);">Email</label><div style="padding:8px 0;">${esc(t.email)}</div></div></div>
-      <div style="font-size:11px;color:var(--muted);">Passcode: <span class="pass-chip">${esc(t.passcode)}</span></div>
     </div>
     <div class="card"><h3>🧾 Rent Balance</h3>
       <div class="rent-box">
@@ -646,7 +569,7 @@ function tabProfile(role){
     </div>`;
   }
   const list = role==='agent'? DB.agents : DB.caretakers;
-  const rec = list.find(r=>r.passcode===app.identity.passcode) || app.identity;
+  const rec = list.find(r=>r.id===app.profile.id) || {};
   return `<div class="card"><h3>👤 ${PORTAL_META[role].label} Profile</h3>
     <div class="row" style="align-items:flex-start;">
       <div style="flex:0 0 100px;">
@@ -658,46 +581,52 @@ function tabProfile(role){
         <div><label style="display:block;font-size:11px;color:var(--muted);">Phone</label><div style="padding:8px 0;">${esc(rec.phone)}</div></div>
       </div>
     </div>
-    <div style="font-size:11px;color:var(--muted);">Serving since ${fmtDate(rec.start).split(',')[0]}${rec.active===false?' · <span style="color:var(--danger)">Access revoked</span>':''} · Passcode: <span class="pass-chip">${esc(rec.passcode)}</span></div>
+    <div style="font-size:11px;color:var(--muted);">Serving since ${fmtDate(rec.start).split(',')[0]}${rec.active===false?' · <span style="color:var(--danger)">Access revoked</span>':''}</div>
   </div>`;
 }
 
-/* ---------------- GENERATE PASSCODE ---------------- */
+/* ---------------- INVITE (was "generate passcode") ---------------- */
 function tabGenerate(role){
-  const target = {admin:'Agent', agent:'Caretaker', caretaker:'Tenant'}[role];
-  const list = {admin:DB.agents, agent:DB.caretakers, caretaker:DB.tenants}[role];
-  const extraField = role==='caretaker' ? `<div class="field"><label>House No. (001–200)</label><input id="g_house" placeholder="e.g. 057"></div>` :
-    `<div class="field"><label>${role==='admin'?'ID Number':'Email'}</label><input id="g_extra" placeholder="${role==='admin'?'e.g. 31245678':'name@email.com'}"></div>`;
-  const canRevoke = role==='agent' || role==='admin' || role==='caretaker';
+  const targetRole = { owner:'agent', agent:'caretaker', caretaker:'tenant' }[role];
+  const targetLabel = { agent:'Agent', caretaker:'Caretaker', tenant:'Tenant' }[targetRole];
+  const list = { agent:DB.agents, caretaker:DB.caretakers, tenant:DB.tenants }[targetRole];
+  const extraField = targetRole==='tenant'
+    ? `<div class="field"><label>House No. (001–200)</label><input id="g_house" placeholder="e.g. 057"></div>`
+    : `<div class="field"><label>ID Number (optional)</label><input id="g_extra" placeholder="e.g. 31245678"></div>`;
   return `
   <div class="card">
-    <h3>🔑 Generate ${target} Passcode</h3>
+    <h3>🔑 Invite a ${targetLabel}</h3>
+    <div style="font-size:11.5px;color:var(--muted); margin-bottom:12px;">They'll receive an email invite link to set their own password. No passcodes are shared.</div>
     <div class="row">
       <div class="field"><label>Full Name</label><input id="g_name" placeholder="Full name"></div>
-      <div class="field"><label>Phone Number</label><input id="g_phone" placeholder="07XX XXX XXX"></div>
+      <div class="field"><label>Email</label><input id="g_email" placeholder="name@email.com"></div>
     </div>
-    ${extraField}
-    <button class="btn3d btn-gold" id="genBtn">⚙️ Generate Passcode</button>
+    <div class="row">
+      <div class="field"><label>Phone Number</label><input id="g_phone" placeholder="07XX XXX XXX"></div>
+      ${extraField}
+    </div>
+    <div id="genErr" style="color:var(--danger); font-size:12.5px; margin-bottom:8px;"></div>
+    <button class="btn3d btn-gold" id="genBtn">📨 Send Invite</button>
   </div>
   <div class="card">
-    <h3>📋 ${target} Records</h3>
-    <table><thead><tr><th>Name</th><th>${role==='caretaker'?'House':(role==='admin'?'ID No.':'Email')}</th><th>Phone</th><th>Passcode</th>${canRevoke?'<th></th>':''}</tr></thead>
+    <h3>📋 ${targetLabel} Records</h3>
+    <table><thead><tr><th>Name</th><th>${targetRole==='tenant'?'House':'Email'}</th><th>Phone</th><th>Status</th><th></th></tr></thead>
     <tbody>
-      ${list.map((r,i)=>`<tr>
-        <td>${esc(r.name)}</td><td>${esc(role==='caretaker'? r.house : (role==='admin'? r.id : r.email))}</td><td>${esc(r.phone)}</td>
-        <td><span class="pass-chip" style="${r.active===false?'opacity:.4;text-decoration:line-through;':''}">${esc(r.passcode)}</span></td>
-        ${canRevoke? `<td style="display:flex; gap:6px;">
-            <button class="btn3d btn-sm" data-regen="${i}">↻ Regenerate</button>
-            <button class="btn3d btn-sm ${r.active===false?'btn-gold':'btn-danger'}" data-revoke="${i}">${r.active===false?'Restore':'Revoke'}</button>
-          </td>`:''}
+      ${list.map((r)=>`<tr>
+        <td>${esc(r.name)}</td><td>${esc(targetRole==='tenant'? r.house : r.email)}</td><td>${esc(r.phone)}</td>
+        <td>${r.active===false?'<span style="color:var(--danger)">Revoked</span>':'<span style="color:var(--ok)">Active</span>'}</td>
+        <td style="display:flex; gap:6px;">
+            <button class="btn3d btn-sm" data-resetpw="${esc(r.email||'')}">✉ Reset Link</button>
+            <button class="btn3d btn-sm ${r.active===false?'btn-gold':'btn-danger'}" data-revoke="${r.id}" data-role="${targetRole}">${r.active===false?'Restore':'Revoke'}</button>
+          </td>
       </tr>`).join('') || `<tr><td colspan="5" style="color:var(--muted)">No records yet.</td></tr>`}
     </tbody></table>
   </div>`;
 }
 
-/* ---------------- RECEIVED ---------------- */
+/* ---------------- RECEIVED / SEND ---------------- */
 function tabReceived(role){
-  const label = {admin:'Admin', agent:'Agent', caretaker:'Caretaker', tenant:'Tenant'}[role];
+  const label = ROLE_LABEL[role];
   const msgs = DB.messages.filter(m=>m.to===label).slice().reverse();
   return `
   <div class="card">
@@ -707,7 +636,7 @@ function tabReceived(role){
         <div class="meta"><span>From ${esc(m.from)}</span><span>${fmtDate(m.ts)}</span></div>
         <div style="font-weight:700; font-size:13.5px; margin-bottom:4px;">${esc(m.subject)}</div>
         <div style="font-size:13px; color:var(--muted);">${esc(m.body)}</div>
-        ${m.file?`<div class="attach-box">📎 ${esc(m.file)}</div>`:''}
+        ${m.file?`<a class="attach-box" href="${esc(m.file)}" target="_blank" rel="noopener">📎 View attachment</a>`:''}
       </div>`).join('') || '<div style="color:var(--muted);font-size:13px;">Nothing received yet.</div>'}
     <div style="display:flex; gap:10px; margin-top:14px;">
       <button class="btn3d" data-save="csv">⬇ Save CSV</button>
@@ -716,13 +645,11 @@ function tabReceived(role){
     </div>
   </div>`;
 }
-
-/* ---------------- SEND ---------------- */
 function sendRecipients(role){
-  if(role==='admin') return [['Agent','Agent']];
-  if(role==='agent') return [['Admin','Owner / Admin'],['Caretaker','Caretaker']];
-  if(role==='caretaker') return [['Agent','Agent'],['Tenant','All Tenants']];
-  if(role==='tenant') return [['Caretaker','Caretaker']];
+  if(role==='owner') return [['agent','Agent']];
+  if(role==='agent') return [['owner','Owner / Admin'],['caretaker','Caretaker']];
+  if(role==='caretaker') return [['agent','Agent'],['tenant','All Tenants']];
+  if(role==='tenant') return [['caretaker','Caretaker']];
   return [];
 }
 function tabSend(role){
@@ -745,7 +672,7 @@ function tabSend(role){
 
 /* ---------------- NOTICES ---------------- */
 function noticeBoards(role){
-  if(role==='admin') return [['global','Global Notice Board', true]];
+  if(role==='owner') return [['global','Global Notice Board', true]];
   if(role==='agent') return [['global','Global Notice Board', false],['agent','Agent Notice Board', true]];
   if(role==='caretaker') return [['agent','From Agent', false],['caretaker','Caretaker Notice Board', true],['tenant','Tenant Notice Board', true]];
   if(role==='tenant') return [['caretaker','From Caretaker', false],['tenant','Tenant Notice Board', false]];
@@ -778,7 +705,7 @@ function tabReport(role){
   const expected = DB.tenants.reduce((s,t)=>s+(t.rentExpected||0),0);
   const paid = DB.tenants.reduce((s,t)=>s+(t.rentPaid||0),0);
   let rentBlock = '';
-  if(role==='admin'){
+  if(role==='owner'){
     rentBlock = `<div class="svg-card"><h4>Rent Collection (this month)</h4>${svgBars([{k:'Expected',v:expected},{k:'Collected',v:paid}])}<div style="font-size:11px;color:var(--muted); margin-top:6px;">${money(expected-paid)} outstanding across ${DB.tenants.length} recorded tenant(s)</div></div>`;
   }
   return `
@@ -791,17 +718,16 @@ function tabReport(role){
   </div>`;
 }
 
-/* ---------------- ADMIN: AUDIT LOG ---------------- */
+/* ---------------- AUDIT LOG ---------------- */
 function tabAudit(){
   return `<div class="card">
-    <h3>🕵️ Audit Log <span style="font-size:11px;color:var(--muted); font-weight:400;">(who generated what, and when)</span></h3>
-    <div style="font-size:11.5px;color:var(--muted); margin-bottom:14px;">Clearing is meant to happen once, at the end of each month — it wipes this list only, nothing else in the system.</div>
+    <h3>🕵️ Audit Log</h3>
+    <div style="font-size:11.5px;color:var(--muted); margin-bottom:14px;">A permanent record of who invited/revoked whom, and when. This log itself cannot be deleted from the portal — that's intentional for a real audit trail.</div>
     ${DB.auditLog.map(a=>`<div class="audit-row"><b style="color:var(--ink)">${esc(a.actor)}</b> ${esc(a.action)} — ${esc(a.detail)} <span style="float:right;">${fmtDate(a.ts)}</span></div>`).join('') || '<div style="color:var(--muted);font-size:13px;">No activity logged yet.</div>'}
-    <button class="btn3d btn-danger" id="clearAudit" style="margin-top:16px;">🧹 Clear Audit Log (end of month)</button>
   </div>`;
 }
 
-/* ---------------- AGENT: TOUR / POLICY EDIT ---------------- */
+/* ---------------- TOUR / POLICY EDIT ---------------- */
 function tabTourEdit(){
   return `
   <div class="card"><h3>🗺️ Edit Tour Content</h3>
@@ -811,16 +737,16 @@ function tabTourEdit(){
     <button class="btn3d btn-gold" id="saveTour" style="margin-top:6px;">💾 Publish to Tour Page</button>
   </div>
   <div class="card"><h3>📷 Gallery Images</h3>
-    <div style="font-size:11.5px;color:var(--muted); margin-bottom:14px;">Upload a photo for each angle (max 5MB, JPG/PNG). Uploading replaces the placeholder immediately.</div>
+    <div style="font-size:11.5px;color:var(--muted); margin-bottom:14px;">Upload a photo for each angle (max 5MB, JPG/PNG).</div>
     <div class="cardgrid" style="grid-template-columns:repeat(3,1fr);">
-      ${DB.tour.gallery.map((g,i)=>`
+      ${DB.tour.gallery.map((g)=>`
         <div>
           <div class="imgph ${g.url?'has-img':''}" style="min-height:120px;">
             ${g.url? `<img src="${esc(g.url)}" alt="${esc(g.label)}">` : `📷<br>${esc(g.label)}`}
           </div>
           <div style="font-size:11px;color:var(--muted); margin:8px 0 4px;">${esc(g.label)}</div>
-          <input type="file" accept="image/*" data-upload="${i}" style="font-size:11px; padding:6px;">
-          <input data-cap="${i}" value="${esc(g.caption)}" placeholder="Caption..." style="margin-top:6px;">
+          <input type="file" accept="image/*" data-upload="${g.slot}" style="font-size:11px; padding:6px;">
+          <input data-cap="${g.slot}" value="${esc(g.caption)}" placeholder="Caption..." style="margin-top:6px;">
         </div>
       `).join('')}
     </div>
@@ -834,9 +760,7 @@ function tabPolicyEdit(){
       <div class="field"><label>Policy Title</label><input id="pol_title" placeholder="e.g. Pet Policy"></div>
       <div class="field"><label>Category</label><select id="pol_cat"><option>Payments</option><option>Maintenance</option><option>Conduct</option><option>Move-in / Move-out</option></select></div>
     </div>
-    <div class="field"><label>Policy Details</label><textarea id="pol_body" rows="3" placeholder="Describe the policy..."></textarea>
-      <div class="attach-box"><span class="attach-btn">+</span> Attach supporting document (optional)</div>
-    </div>
+    <div class="field"><label>Policy Details</label><textarea id="pol_body" rows="3" placeholder="Describe the policy..."></textarea></div>
     <button class="btn3d btn-gold" id="addPolicy">📨 Publish to Policies Page</button>
   </div>
   <div class="card"><h3>Current Policies</h3>
@@ -844,13 +768,13 @@ function tabPolicyEdit(){
   </div>`;
 }
 
-/* ---------------- CARETAKER: HOUSE STATUS ---------------- */
+/* ---------------- HOUSE STATUS ---------------- */
 function tabHouseStatus(){
   const occ = DB.houses.filter(h=>h.status==='occ').length;
   return `
   <div class="card">
-    <h3>🏘️ House Status <span style="font-size:12px;color:var(--muted); font-weight:400;">(${occ} occupied / ${DB.houses.length-occ} vacant of 200)</span></h3>
-    <div style="font-size:12px;color:var(--muted); margin-bottom:10px;">Click a unit to toggle occupied ⇄ vacant.</div>
+    <h3>🏘️ House Status <span style="font-size:12px;color:var(--muted); font-weight:400;">(${occ} occupied / ${DB.houses.length-occ} vacant of ${DB.houses.length})</span></h3>
+    <div style="font-size:12px;color:var(--muted); margin-bottom:10px;">Click a unit to toggle occupied ⇄ vacant. (Occupying a house directly here does not assign a tenant — use "Invite Tenant" for that.)</div>
     <div class="house-grid">
       ${DB.houses.map(h=>`<div class="house ${h.status} ${h.lastInspected?'inspected':''}" data-house="${h.no}" title="${h.status==='occ'?'Occupied — '+esc(h.tenant||''):'Vacant'}">${h.no}</div>`).join('')}
     </div>
@@ -879,95 +803,62 @@ function tabHouseStatus(){
   </div>`;
 }
 
-/* ---------------- CARETAKER: TENANTS ---------------- */
+/* ---------------- TENANTS ---------------- */
 function tabTenants(){
   return `
   <div class="card">
     <h3>🧾 Tenant Records</h3>
     <table><thead><tr><th>House</th><th>Name</th><th>Phone</th><th>Rent Expected</th><th>Balance</th><th>Last Payment</th><th></th></tr></thead>
     <tbody>
-      ${DB.tenants.map((t,i)=>`<tr>
-        <td>${esc(t.house)}</td>
-        <td>${esc(t.name)}</td>
-        <td>${esc(t.phone)}</td>
+      ${DB.tenants.map((t)=>`<tr>
+        <td>${esc(t.house)}</td><td>${esc(t.name)}</td><td>${esc(t.phone)}</td>
         <td>${money(t.rentExpected||0)}</td>
         <td style="color:${(t.balance||0)>0?'var(--danger)':'var(--ok)'}">${money(t.balance||0)}</td>
         <td>${esc(t.lastPayment||'—')}</td>
-        <td><button class="btn3d btn-sm" data-edittenant="${i}">✎ Edit</button></td>
-      </tr>`).join('') || `<tr><td colspan="7" style="color:var(--muted)">No tenants yet — generate one in the "Generate Tenant" tab.</td></tr>`}
+        <td><button class="btn3d btn-sm" data-edittenant="${t.id}">✎ Edit</button></td>
+      </tr>`).join('') || `<tr><td colspan="7" style="color:var(--muted)">No tenants yet — invite one in the "Invite Tenant" tab.</td></tr>`}
     </tbody></table>
   </div>`;
 }
-function openTenantEditModal(i){
-  const t = DB.tenants[i];
+function openTenantEditModal(id){
+  const t = DB.tenants.find(t=>t.id===id);
   const back = document.createElement('div');
   back.innerHTML = `<div class="modal-back" id="tenantEditModal"><div class="modal">
     <h3>✎ Edit Tenant — House ${esc(t.house)}</h3>
     <div class="row">
-      <div class="field"><label>Full Name</label><input id="te_name" value="${esc(t.name)}"></div>
-      <div class="field"><label>House No. (001–200)</label><input id="te_house" value="${esc(t.house)}"></div>
-    </div>
-    <div class="row">
-      <div class="field"><label>Phone</label><input id="te_phone" value="${esc(t.phone)}"></div>
-      <div class="field"><label>Email</label><input id="te_email" value="${esc(t.email||'')}"></div>
-    </div>
-    <div class="row">
       <div class="field"><label>Rent Expected / Month</label><input id="te_expected" value="${t.rentExpected||0}"></div>
       <div class="field"><label>Balance</label><input id="te_balance" value="${t.balance||0}"></div>
     </div>
-    <div class="row">
-      <div class="field"><label>Last Payment Date</label><input type="date" id="te_lastpayment" value="${esc(t.lastPayment||'')}"></div>
-    </div>
     <div id="tenantEditErr" style="color:var(--danger); font-size:12.5px; margin-bottom:10px;"></div>
     <button class="btn3d btn-gold" id="teSave" style="width:100%; margin-bottom:16px;">💾 Save Details</button>
-
     <div style="border-top:1px solid var(--line); padding-top:14px;">
       <h4 style="font-size:12px; color:var(--gold); margin-bottom:10px; text-transform:uppercase; letter-spacing:1px;">Record a Payment</h4>
       <div class="field"><label>Amount Received</label><input id="te_payment" placeholder="e.g. 18670"></div>
       <button class="btn3d btn-gold" id="teRecordPayment" style="width:100%;">➕ Record Payment</button>
-      <div style="font-size:11px;color:var(--muted); margin-top:8px;">Last payment: ${esc(t.lastPayment||'—')}. Recording a payment adds it to "Paid this month" and reduces the balance.</div>
+      <div style="font-size:11px;color:var(--muted); margin-top:8px;">Last payment: ${esc(t.lastPayment||'—')}.</div>
     </div>
-
     <button class="btn3d btn-ghost" id="teCancel" style="width:100%; margin-top:16px;">Close</button>
   </div></div>`;
   document.body.appendChild(back.firstElementChild);
   document.getElementById('teCancel').onclick = ()=> document.getElementById('tenantEditModal').remove();
 
-  document.getElementById('teSave').onclick = ()=>{
-    const newHouse = document.getElementById('te_house').value.trim().padStart(3,'0');
-    const oldHouse = t.house;
-    const newName = document.getElementById('te_name').value.trim() || t.name;
-    if(newHouse !== oldHouse){
-      const clash = DB.tenants.find((x,xi)=>xi!==i && x.house===newHouse);
-      if(clash){ document.getElementById('tenantEditErr').textContent = `House ${newHouse} already has a tenant (${clash.name}).`; return; }
-      const oldH = DB.houses.find(h=>h.no===oldHouse); if(oldH){ oldH.status='emp'; oldH.tenant=null; }
-      const newH = DB.houses.find(h=>h.no===newHouse); if(newH){ newH.status='occ'; newH.tenant=newName; }
-      logAudit(identityName(), 'reassigned tenant', `${newName}: House ${oldHouse} → ${newHouse}`);
-    }
-    t.name = newName; t.house = newHouse; t.no = newHouse;
-    t.phone = document.getElementById('te_phone').value.trim();
-    t.email = document.getElementById('te_email').value.trim();
-    t.rentExpected = parseFloat(document.getElementById('te_expected').value)||0;
-    t.balance = parseFloat(document.getElementById('te_balance').value)||0;
-    t.lastPayment = document.getElementById('te_lastpayment').value || t.lastPayment;
-    const h = DB.houses.find(h=>h.no===t.house); if(h) h.tenant = t.name;
-    logAudit(identityName(), 'updated tenant record for', `${t.name} (House ${t.house})`);
-    saveDB(true);
-    document.getElementById('tenantEditModal').remove();
-    render();
+  document.getElementById('teSave').onclick = async ()=>{
+    const expected = parseFloat(document.getElementById('te_expected').value)||0;
+    const balance = parseFloat(document.getElementById('te_balance').value)||0;
+    const { error } = await sb.from('tenant_accounts').update({ rent_expected: expected, balance }).eq('tenant_id', t.id);
+    if(error){ document.getElementById('tenantEditErr').textContent = error.message; return; }
+    await sb.from('audit_log').insert({ actor_id: app.profile.id, action: 'updated tenant record for', detail: `${t.name} (House ${t.house})` });
+    toast('Saved'); document.getElementById('tenantEditModal').remove(); await refresh();
   };
-
-  document.getElementById('teRecordPayment').onclick = ()=>{
+  document.getElementById('teRecordPayment').onclick = async ()=>{
     const amt = parseFloat(document.getElementById('te_payment').value);
     if(!amt || amt<=0){ document.getElementById('tenantEditErr').textContent = 'Enter a valid payment amount.'; return; }
-    t.rentPaid = (t.rentPaid||0) + amt;
-    t.balance = Math.max(0, (t.balance||0) - amt);
-    t.lastPayment = new Date().toISOString().slice(0,10);
-    logAudit(identityName(), 'recorded a payment for', `${t.name} — ${money(amt)}`);
-    saveDB(true);
-    document.getElementById('tenantEditModal').remove();
-    toast('Payment recorded');
-    render();
+    const today = new Date().toISOString().slice(0,10);
+    const newPaid = (t.rentPaid||0) + amt, newBal = Math.max(0, (t.balance||0) - amt);
+    await sb.from('payments').insert({ tenant_id: t.id, amount: amt, recorded_by: app.profile.id });
+    await sb.from('tenant_accounts').update({ rent_paid: newPaid, balance: newBal, last_payment: today }).eq('tenant_id', t.id);
+    await sb.from('audit_log').insert({ actor_id: app.profile.id, action: 'recorded a payment for', detail: `${t.name} — ${money(amt)}` });
+    toast('Payment recorded'); document.getElementById('tenantEditModal').remove(); await refresh();
   };
 }
 
@@ -986,7 +877,7 @@ function tabComplainForm(){
     <button class="btn3d btn-danger" id="sendComplaint">Send Complaint</button>
   </div>
   <div class="card"><h3>Your Past Complaints</h3>
-    ${DB.complaints.filter(c=>c.tenant===app.identity.name).slice().reverse().map(c=>`
+    ${DB.complaints.filter(c=>c.tenant_id===app.profile.id).slice().reverse().map(c=>`
       <div class="msg-item"><div class="meta"><span>${fmtDate(c.ts)}</span></div>${esc(c.text)}${statusTrack(c.status)}</div>
     `).join('') || '<div style="color:var(--muted);font-size:13px;">None yet.</div>'}
   </div>`;
@@ -1014,116 +905,71 @@ function tabComplaintsList(){
    ============================================================ */
 function attachPageEvents(){
   document.querySelectorAll('[data-flip]').forEach(el=>{ el.onclick = ()=> el.classList.toggle('flipped'); });
+  document.querySelectorAll('.portal-nav button[data-tab]').forEach(b=>{ b.onclick = ()=>{ app.portalTab=b.dataset.tab; render(); }; });
 
-  document.querySelectorAll('.portal-nav button[data-tab]').forEach(b=>{
-    b.onclick = ()=>{ app.portalTab=b.dataset.tab; render(); };
-  });
+  const promptSignIn = document.getElementById('promptSignIn');
+  if(promptSignIn) promptSignIn.onclick = openLoginModal;
+
   const logoutBtn = document.getElementById('logoutBtn');
-  if(logoutBtn) logoutBtn.onclick = ()=>{ app.portal=null; app.identity=null; app.page='home'; render(); };
+  if(logoutBtn) logoutBtn.onclick = async ()=>{ await sb.auth.signOut(); app.portal=null; app.profile=null; app.page='home'; render(); };
 
   const saveProfile = document.getElementById('saveProfile');
-  if(saveProfile) saveProfile.onclick = ()=>{
-    DB.owner.name=document.getElementById('p_name').value;
-    DB.owner.phone=document.getElementById('p_phone').value;
-    DB.owner.email=document.getElementById('p_email').value;
-    const sd = document.getElementById('p_start').value;
-    if(sd) DB.owner.start = new Date(sd).getTime();
-    app.identity = { ...DB.owner };
-    saveDB(true); render();
+  if(saveProfile) saveProfile.onclick = async ()=>{
+    const name = document.getElementById('p_name').value, phone = document.getElementById('p_phone').value;
+    await sb.from('profiles').update({ name, phone }).eq('id', app.profile.id);
+    toast('Saved'); await refresh();
   };
-
   const pPhoto = document.getElementById('p_photo');
-  if(pPhoto) pPhoto.onchange = (e)=> uploadPersonPhoto(app.portal, e.target.files[0]);
-
-  const handoverBtn = document.getElementById('handoverBtn');
-  if(handoverBtn) handoverBtn.onclick = ()=>{
-    const name = document.getElementById('ho_name').value.trim();
-    const phone = document.getElementById('ho_phone').value.trim();
-    const email = document.getElementById('ho_email').value.trim();
-    const reason = document.getElementById('ho_reason').value.trim();
-    if(!name || !phone){ toast("Enter the successor's name and phone"); return; }
-    if(!confirm(`Hand over ownership to ${name}? ${DB.owner.name} will be archived into history.`)) return;
-    DB.ownerHistory = DB.ownerHistory || [];
-    DB.ownerHistory.push({ ...DB.owner, end:Date.now(), reason: reason || 'Ownership transferred' });
-    const outgoing = DB.owner.name;
-    DB.owner = { name, phone, email, photo:null, start:Date.now() };
-    app.identity = { ...DB.owner };
-    logAudit(name, 'received ownership from', outgoing);
-    saveDB(true); toast('Ownership transferred to '+name); render();
-  };
+  if(pPhoto) pPhoto.onchange = (e)=> uploadPersonPhoto(e.target.files[0]);
 
   const genBtn = document.getElementById('genBtn');
-  if(genBtn) genBtn.onclick = ()=>{
-    const role = app.portal;
+  if(genBtn) genBtn.onclick = async ()=>{
+    const targetRole = { owner:'agent', agent:'caretaker', caretaker:'tenant' }[app.portal];
     const name = document.getElementById('g_name').value.trim();
+    const email = document.getElementById('g_email').value.trim();
     const phone = document.getElementById('g_phone').value.trim();
-    if(!name || !phone){ toast('Please fill in name and phone'); return; }
-    const actor = identityName();
-    if(role==='admin'){
-      const id = document.getElementById('g_extra').value.trim();
-      const seq = DB.agents.length+1;
-      const pc = genPass('agt',seq);
-      DB.agents.push({name, id, phone, passcode:pc, start:Date.now(), end:null, photo:null, active:true});
-      logAudit(actor, 'generated Agent passcode', `${name} → ${pc}`);
-    } else if(role==='agent'){
-      const email = document.getElementById('g_extra').value.trim();
-      const seq = DB.caretakers.length+1;
-      const pc = genPass('care',seq);
-      DB.caretakers.push({name, email, phone, passcode:pc, start:Date.now(), end:null, photo:null, active:true});
-      logAudit(actor, 'generated Caretaker passcode', `${name} → ${pc}`);
-    } else if(role==='caretaker'){
-      const house = (document.getElementById('g_house').value.trim()||'000').padStart(3,'0');
-      const pc = `tent-${house}-` + genPass('x',0).split('-')[2];
-      DB.tenants.push({no:house, name, phone, email:'', passcode:pc, house, rentExpected:0, rentPaid:0, balance:0, lastPayment:'', active:true});
-      const h = DB.houses.find(h=>h.no===house); if(h){ h.status='occ'; h.tenant=name; }
-      logAudit(actor, 'generated Tenant passcode', `${name} (House ${house}) → ${pc}`);
-    }
-    saveDB(true); render();
+    if(!name || !email || !phone){ document.getElementById('genErr').textContent = 'Fill in name, email and phone.'; return; }
+    const payload = { role: targetRole, name, email, phone };
+    if(targetRole==='tenant') payload.house_no = (document.getElementById('g_house').value.trim()||'').padStart(3,'0');
+    else payload.id_number = document.getElementById('g_extra').value.trim();
+
+    const { data, error } = await sb.functions.invoke('invite-user', { body: payload });
+    if(error || data?.error){ document.getElementById('genErr').textContent = data?.error || error.message; return; }
+    toast('Invite sent to '+email); await refresh();
   };
 
   document.querySelectorAll('[data-revoke]').forEach(b=>{
-    b.onclick = ()=>{
-      const role = app.portal; const i = b.dataset.revoke;
-      const list = listForRole(role);
-      const rec = list[i];
+    b.onclick = async ()=>{
+      const list = { agent:DB.agents, caretaker:DB.caretakers, tenant:DB.tenants }[b.dataset.role];
+      const rec = list.find(r=>r.id===b.dataset.revoke);
       if(rec.active===false){
-        rec.active = true; rec.end = null;
-        logAudit(identityName(), 'restored access for', rec.name);
+        await sb.from('profiles').update({ active:true, end_date:null }).eq('id', rec.id);
+        await sb.from('audit_log').insert({ actor_id: app.profile.id, action:'restored access for', detail: rec.name });
       } else {
         const reason = prompt(`Reason for revoking ${rec.name}'s access? (optional)`) || '';
-        rec.active = false; rec.end = Date.now(); rec.reason = reason;
-        logAudit(identityName(), 'revoked access for', rec.name + (reason? ' — '+reason : ''));
+        await sb.from('profiles').update({ active:false, end_date: new Date().toISOString(), revoke_reason: reason }).eq('id', rec.id);
+        await sb.from('audit_log').insert({ actor_id: app.profile.id, action:'revoked access for', detail: rec.name + (reason? ' — '+reason:'') });
       }
-      saveDB(true); render();
+      await refresh();
     };
   });
-  document.querySelectorAll('[data-regen]').forEach(b=>{
-    b.onclick = ()=>{
-      const role = app.portal; const i = b.dataset.regen;
-      const list = listForRole(role);
-      let pc;
-      if(role==='caretaker'){
-        pc = `tent-${list[i].house}-` + genPass('x',0).split('-')[2];
-      } else {
-        const prefix = role==='admin'? 'agt':'care';
-        pc = genPass(prefix, parseInt(i)+1);
-      }
-      list[i].passcode = pc;
-      logAudit(identityName(), 'regenerated passcode for', list[i].name);
-      saveDB(true); render();
+  document.querySelectorAll('[data-resetpw]').forEach(b=>{
+    b.onclick = async ()=>{
+      const email = b.dataset.resetpw;
+      if(!email){ toast('No email on file'); return; }
+      const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + window.location.pathname });
+      toast(error ? error.message : 'Reset link sent to '+email);
     };
   });
 
   document.querySelectorAll('[data-save]').forEach(b=>{
     b.onclick = ()=>{
-      const label = {admin:'Admin', agent:'Agent', caretaker:'Caretaker', tenant:'Tenant'}[app.portal];
+      const label = ROLE_LABEL[app.portal];
       const msgs = DB.messages.filter(m=>m.to===label);
       const type = b.dataset.save;
-      if(type==='csv'){
-        downloadBlob(toCSV([['From','Subject','Message','Date'], ...msgs.map(m=>[m.from,m.subject,m.body,fmtDate(m.ts)])]), 'received.csv', 'text/csv');
-      } else if(type==='excel'){
-        downloadBlob(toCSV([['From','Subject','Message','Date'], ...msgs.map(m=>[m.from,m.subject,m.body,fmtDate(m.ts)])]), 'received.xls', 'application/vnd.ms-excel');
-      } else { window.print(); }
+      if(type==='csv'){ downloadBlob(toCSV([['From','Subject','Message','Date'], ...msgs.map(m=>[m.from,m.subject,m.body,fmtDate(m.ts)])]), 'received.csv', 'text/csv'); }
+      else if(type==='excel'){ downloadBlob(toCSV([['From','Subject','Message','Date'], ...msgs.map(m=>[m.from,m.subject,m.body,fmtDate(m.ts)])]), 'received.xls', 'application/vnd.ms-excel'); }
+      else { window.print(); }
     };
   });
 
@@ -1136,116 +982,132 @@ function attachPageEvents(){
     };
   }
   const sendBtn = document.getElementById('sendBtn');
-  if(sendBtn) sendBtn.onclick = ()=>{
-    const to = document.getElementById('s_to').value;
+  if(sendBtn) sendBtn.onclick = async ()=>{
+    const to_role = document.getElementById('s_to').value;
     const subject = document.getElementById('s_subject').value.trim();
     const body = document.getElementById('s_body').value.trim();
     const file = document.getElementById('fileInput').files[0];
     if(!subject || !body){ toast('Add a subject and message'); return; }
-    const fromLabel = {admin:'Admin', agent:'Agent', caretaker:'Caretaker', tenant:'Tenant'}[app.portal];
-    DB.messages.push({id:Date.now(), from:fromLabel, to, subject, body, file: file?file.name:null, ts:Date.now()});
-    saveDB(true); toast('Sent to '+to); render();
+    let file_path = null;
+    if(file){
+      if(file.size > 10*1024*1024){ toast('File too large — 10MB max'); return; }
+      const path = `attachments/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g,'-')}`;
+      const { error: upErr } = await sb.storage.from(STORAGE_BUCKET).upload(path, file);
+      if(upErr){ toast('Attachment upload failed: '+upErr.message); return; }
+      file_path = sb.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+    }
+    await sb.from('messages').insert({ from_id: app.profile.id, to_role, subject, body, file_path });
+    toast('Sent'); await refresh();
   };
 
   document.querySelectorAll('[data-postnotice]').forEach(b=>{
-    b.onclick = ()=>{
-      const id = b.dataset.postnotice;
-      const txt = document.getElementById('np_'+id).value.trim();
-      const urgency = document.getElementById('nu_'+id).value;
+    b.onclick = async ()=>{
+      const board = b.dataset.postnotice;
+      const txt = document.getElementById('np_'+board).value.trim();
+      const urgency = document.getElementById('nu_'+board).value;
       if(!txt) return;
-      const author = {admin:'Admin', agent:'Agent', caretaker:'Caretaker'}[app.portal];
-      DB.notices[id] = DB.notices[id]||[];
-      DB.notices[id].push({id:Date.now(), author, text:txt, ts:Date.now(), urgency});
-      saveDB(true); render();
+      await sb.from('notices').insert({ board, author_id: app.profile.id, text: txt, urgency });
+      await refresh();
     };
   });
 
   const saveTour = document.getElementById('saveTour');
-  if(saveTour) saveTour.onclick = ()=>{
-    DB.tour.history = document.getElementById('t_history').value;
-    DB.tour.challenge = document.getElementById('t_challenge').value;
-    DB.tour.quote = document.getElementById('t_quote').value;
-    saveDB(true); toast('Tour page updated');
+  if(saveTour) saveTour.onclick = async ()=>{
+    const history = document.getElementById('t_history').value, challenge = document.getElementById('t_challenge').value, quote = document.getElementById('t_quote').value;
+    await sb.from('tour_content').update({ history, challenge, quote, updated_by: app.profile.id, updated_at: new Date().toISOString() }).eq('id',1);
+    toast('Tour page updated'); await refresh();
   };
-  document.querySelectorAll('[data-upload]').forEach(inp=>{
-    inp.onchange = (e)=> uploadTourImage(parseInt(inp.dataset.upload), e.target.files[0]);
-  });
+  document.querySelectorAll('[data-upload]').forEach(inp=>{ inp.onchange = (e)=> uploadTourImage(parseInt(inp.dataset.upload), e.target.files[0]); });
   const saveGallery = document.getElementById('saveGallery');
-  if(saveGallery) saveGallery.onclick = ()=>{
-    document.querySelectorAll('[data-cap]').forEach(inp=>{ DB.tour.gallery[inp.dataset.cap].caption = inp.value; });
-    saveDB(true); toast('Captions saved');
+  if(saveGallery) saveGallery.onclick = async ()=>{
+    const updates = [...document.querySelectorAll('[data-cap]')].map(inp=> sb.from('tour_gallery').update({ caption: inp.value }).eq('slot', parseInt(inp.dataset.cap)) );
+    await Promise.all(updates);
+    toast('Captions saved'); await refresh();
   };
 
   const addPolicy = document.getElementById('addPolicy');
-  if(addPolicy) addPolicy.onclick = ()=>{
+  if(addPolicy) addPolicy.onclick = async ()=>{
     const title = document.getElementById('pol_title').value.trim();
-    const cat = document.getElementById('pol_cat').value;
+    const category = document.getElementById('pol_cat').value;
     const body = document.getElementById('pol_body').value.trim();
     if(!title || !body){ toast('Add a title and details'); return; }
-    DB.policies.push({title, cat, body, updated:new Date().toISOString().slice(0,10)});
-    saveDB(true); render();
+    await sb.from('policies').insert({ title, category, body, updated_by: app.profile.id });
+    await refresh();
   };
 
   document.querySelectorAll('[data-house]').forEach(el=>{
-    el.onclick = ()=>{
+    el.onclick = async ()=>{
       const h = DB.houses.find(h=>h.no===el.dataset.house);
       const wasOcc = h.status==='occ';
-      h.status = wasOcc ? 'emp' : 'occ';
-      if(h.status==='emp'){
-        h.tenant=null;
-        DB.messages.push({id:Date.now(), from:'Caretaker', to:'Agent', subject:'Vacancy Alert — House '+h.no, body:`House ${h.no} has just been marked vacant and may need to be re-listed.`, file:null, ts:Date.now()});
+      const newStatus = wasOcc ? 'emp' : 'occ';
+      await sb.from('houses').update({ status: newStatus, tenant_id: newStatus==='emp' ? null : undefined }).eq('no', h.no);
+      if(newStatus==='emp'){
+        await sb.from('messages').insert({ from_id: app.profile.id, to_role:'agent', subject:'Vacancy Alert — House '+h.no, body:`House ${h.no} has just been marked vacant and may need to be re-listed.` });
       }
-      saveDB(false); render();
+      await refresh();
     };
   });
   const bulkInspect = document.getElementById('bulkInspect');
-  if(bulkInspect) bulkInspect.onclick = ()=>{
+  if(bulkInspect) bulkInspect.onclick = async ()=>{
     const from = parseInt(document.getElementById('bulk_from').value)||1;
     const to = parseInt(document.getElementById('bulk_to').value)||from;
     const today = new Date().toISOString().slice(0,10);
-    DB.houses.forEach(h=>{ const n=parseInt(h.no); if(n>=from && n<=to) h.lastInspected=today; });
-    saveDB(true); toast(`Marked houses ${String(from).padStart(3,'0')}–${String(to).padStart(3,'0')} inspected`); render();
+    const nos = DB.houses.filter(h=>{ const n=parseInt(h.no); return n>=from && n<=to; }).map(h=>h.no);
+    await sb.from('houses').update({ last_inspected: today }).in('no', nos);
+    toast(`Marked houses ${String(from).padStart(3,'0')}–${String(to).padStart(3,'0')} inspected`); await refresh();
   };
   const addMaint = document.getElementById('addMaint');
-  if(addMaint) addMaint.onclick = ()=>{
+  if(addMaint) addMaint.onclick = async ()=>{
     const house = (document.getElementById('maint_house').value.trim()).padStart(3,'0');
     const note = document.getElementById('maint_note').value.trim();
-    const h = DB.houses.find(h=>h.no===house);
-    if(!h || !note){ toast('Enter a valid house number and note'); return; }
-    h.maintLog = h.maintLog || [];
-    h.maintLog.push({id:Date.now(), text:note, ts:Date.now()});
-    saveDB(true); toast('Logged'); render();
+    if(!house || !note){ toast('Enter a valid house number and note'); return; }
+    await sb.from('maintenance_log').insert({ house_no: house, note, logged_by: app.profile.id });
+    toast('Logged'); await refresh();
   };
   const reportStatus = document.getElementById('reportStatus');
-  if(reportStatus) reportStatus.onclick = ()=>{
+  if(reportStatus) reportStatus.onclick = async ()=>{
     const occ = DB.houses.filter(h=>h.status==='occ').length;
-    DB.messages.push({id:Date.now(), from:'Caretaker', to:'Agent', subject:'Occupancy Report', body:`${occ} of ${DB.houses.length} units occupied as of today.`, file:null, ts:Date.now()});
-    saveDB(true); toast('Report sent to Agent');
+    await sb.from('messages').insert({ from_id: app.profile.id, to_role:'agent', subject:'Occupancy Report', body:`${occ} of ${DB.houses.length} units occupied as of today.` });
+    toast('Report sent to Agent');
   };
 
-  document.querySelectorAll('[data-edittenant]').forEach(b=>{
-    b.onclick = ()=> openTenantEditModal(parseInt(b.dataset.edittenant));
-  });
+  document.querySelectorAll('[data-edittenant]').forEach(b=>{ b.onclick = ()=> openTenantEditModal(b.dataset.edittenant); });
 
-  const clearAudit = document.getElementById('clearAudit');
-  if(clearAudit) clearAudit.onclick = ()=>{
-    if(!confirm('Clear the entire audit log? This cannot be undone — only do this at the end of the month.')) return;
-    DB.auditLog = [];
-    saveDB(true); toast('Audit log cleared'); render();
-  };
   const sendComplaint = document.getElementById('sendComplaint');
-  if(sendComplaint) sendComplaint.onclick = ()=>{
+  if(sendComplaint) sendComplaint.onclick = async ()=>{
     const text = document.getElementById('c_text').value.trim();
     if(!text) return;
-    DB.complaints.push({id:Date.now(), tenant:app.identity.name, house:app.identity.house, text, ts:Date.now(), status:'open'});
-    saveDB(true); toast('Complaint sent to Caretaker'); render();
+    await sb.from('complaints').insert({ tenant_id: app.profile.id, house_no: app.profile.house_no, text });
+    toast('Complaint sent to Caretaker'); await refresh();
   };
-  document.querySelectorAll('[data-progress]').forEach(b=>{
-    b.onclick = ()=>{ const c = DB.complaints.find(c=>c.id==b.dataset.progress); c.status='inprogress'; saveDB(true); render(); };
-  });
-  document.querySelectorAll('[data-resolve]').forEach(b=>{
-    b.onclick = ()=>{ const c = DB.complaints.find(c=>c.id==b.dataset.resolve); c.status='resolved'; saveDB(true); render(); };
-  });
+  document.querySelectorAll('[data-progress]').forEach(b=>{ b.onclick = async ()=>{ await sb.from('complaints').update({status:'inprogress', updated_at:new Date().toISOString()}).eq('id', b.dataset.progress); await refresh(); }; });
+  document.querySelectorAll('[data-resolve]').forEach(b=>{ b.onclick = async ()=>{ await sb.from('complaints').update({status:'resolved', updated_at:new Date().toISOString()}).eq('id', b.dataset.resolve); await refresh(); }; });
+}
+
+/* ---------------- photo uploads ---------------- */
+async function uploadTourImage(slot, file){
+  if(!file) return;
+  if(!file.type.startsWith('image/')){ toast('Please choose an image file'); return; }
+  if(file.size > 5*1024*1024){ toast('Image is too large — please keep it under 5MB'); return; }
+  toast('Uploading photo…');
+  const path = `slot-${slot}-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g,'-')}`;
+  const { error } = await sb.storage.from(STORAGE_BUCKET).upload(path, file);
+  if(error){ toast('Upload failed: '+error.message); return; }
+  const url = sb.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+  await sb.from('tour_gallery').update({ url }).eq('slot', slot);
+  toast('Uploaded'); await refresh();
+}
+async function uploadPersonPhoto(file){
+  if(!file) return;
+  if(!file.type.startsWith('image/')){ toast('Please choose an image file'); return; }
+  if(file.size > 5*1024*1024){ toast('Image is too large — please keep it under 5MB'); return; }
+  toast('Uploading photo…');
+  const path = `people/${app.profile.id}-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g,'-')}`;
+  const { error } = await sb.storage.from(STORAGE_BUCKET).upload(path, file);
+  if(error){ toast('Upload failed: '+error.message); return; }
+  const url = sb.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+  await sb.from('profiles').update({ photo_url: url }).eq('id', app.profile.id);
+  toast('Uploaded'); await refresh();
 }
 
 /* ============================================================
@@ -1261,15 +1123,9 @@ function initChrome(){
     document.getElementById('overlay').classList.remove('hide');
   };
   document.getElementById('overlay').onclick = closeMenu;
-  document.querySelectorAll('.sidemenu [data-page]').forEach(b=>{
-    b.onclick = ()=>{ app.page=b.dataset.page; closeMenu(); render(); };
-  });
-  document.querySelectorAll('.sidemenu [data-portal]').forEach(b=>{
-    b.onclick = ()=>{ openLoginModal(b.dataset.portal); };
-  });
-  document.querySelectorAll('#pillnav [data-page]').forEach(b=>{
-    b.onclick = ()=>{ app.page=b.dataset.page; render(); };
-  });
+  document.querySelectorAll('.sidemenu [data-page]').forEach(b=>{ b.onclick = ()=>{ app.page=b.dataset.page; closeMenu(); render(); }; });
+  document.querySelectorAll('.sidemenu [data-portal]').forEach(b=>{ b.onclick = ()=>{ closeMenu(); openLoginModal(); }; });
+  document.querySelectorAll('#pillnav [data-page]').forEach(b=>{ b.onclick = ()=>{ app.page=b.dataset.page; render(); }; });
   document.getElementById('darkBtn').onclick = ()=>{
     app.theme = app.theme==='light' ? 'dark' : 'light';
     document.getElementById('darkBtn').innerHTML = app.theme==='light' ? '☀️ Light Mode' : '🌙 Dark Mode';
@@ -1279,14 +1135,14 @@ function initChrome(){
 }
 function openHelp(){
   const items = [
-    ['☰ Menu','Opens the side panel with all four portals plus quick links to the public pages. It also shows which portal you\'re currently signed into.'],
+    ['☰ Menu','Opens the side panel with all four portals plus quick links to the public pages.'],
     ['🌙 Dark Mode','Switches the whole system between dark and light themes.'],
-    ['🏠 Home','Brings you back to the welcome page with live occupancy, the ownership chain, and the flip cards.'],
-    ['🗺️ Tour','Shows the property gallery, history, challenges and the Fine Villa motto. Edited by the Agent.'],
-    ['📄 Policies','House rules grouped by category — Payments, Maintenance, Conduct, Move-in/out. Published by the Agent.'],
-    ['📣 Global Notice Board','Estate-wide announcements posted by the Owner/Admin, tagged by urgency, auto-expiring after 30 days.'],
-    ['🗝️ Portals','Each portal needs a passcode. The Admin passcode is fixed; Agent, Caretaker and Tenant passcodes are generated by the level above them.'],
-    ['📥 Received / 📤 Send','Every portal can message the portal(s) directly above or below it — this replaces the paper slips.'],
+    ['🏠 Home','Live occupancy, the ownership chain, and the flip cards.'],
+    ['🗺️ Tour','Property gallery, history, challenges and the Fine Villa motto. Edited by the Agent.'],
+    ['📄 Policies','House rules grouped by category. Published by the Agent.'],
+    ['📣 Global Notice Board','Estate-wide announcements posted by the Owner/Admin, auto-expiring after 30 days.'],
+    ['🗝️ Portals','Sign in with the email + password set up when you were invited.'],
+    ['📥 Received / 📤 Send','Every portal can message the portal(s) directly above or below it.'],
     ['⚠️ Complaints','Tenants raise issues, tracked Open → In Progress → Resolved by the Caretaker.'],
     ['📊 Report','Live charts summarising occupancy, rent collection, messages and people on record.']
   ];
@@ -1294,29 +1150,10 @@ function openHelp(){
   back.innerHTML = `<div class="modal-back" id="helpModal"><div class="modal">
     <h3>⚙️ How Fine Villa Works</h3>
     ${items.map(([t,d])=>`<div class="help-item"><b>${t}</b><span>${d}</span></div>`).join('')}
-    <a class="help-link" id="reportIssueLink">🐞 Report an issue with the system (not a maintenance complaint)</a>
     <button class="btn3d btn-gold" id="closeHelp" style="width:100%; margin-top:14px;">Got it</button>
   </div></div>`;
   document.body.appendChild(back.firstElementChild);
   document.getElementById('closeHelp').onclick = ()=> document.getElementById('helpModal').remove();
-  document.getElementById('reportIssueLink').onclick = ()=>{
-    document.getElementById('helpModal').remove();
-    openSystemIssueModal();
-  };
-}
-function openSystemIssueModal(){
-  const back = document.createElement('div');
-  back.innerHTML = `<div class="modal-back" id="issueModal"><div class="modal">
-    <h3>🐞 Report a System Issue</h3>
-    <div style="font-size:12.5px;color:var(--muted); margin-bottom:12px;">This goes to the developer, not the Caretaker — use it for bugs or things that look broken, not for maintenance requests (use the Complaints tab in the Tenant Portal for those).</div>
-    <div class="field"><label>Describe what happened</label><textarea id="issue_text" rows="4" placeholder="e.g. The dark mode button doesn't work on..."></textarea></div>
-    <button class="btn3d btn-gold" id="issueSend" style="width:100%;">Send Report</button>
-  </div></div>`;
-  document.body.appendChild(back.firstElementChild);
-  document.getElementById('issueSend').onclick = ()=>{
-    toast('Thanks — your report has been noted.');
-    document.getElementById('issueModal').remove();
-  };
 }
 
 /* ---------------- typing animation ---------------- */
@@ -1324,21 +1161,12 @@ function startTyping(){
   const el = document.getElementById('typingLine');
   if(!el) return;
   const full = "Welcome to Fine Villa Apartments";
-  let i=0;
-  el.textContent='';
+  let i=0; el.textContent='';
   clearInterval(window.__typeInt);
   window.__typeInt = setInterval(()=>{
-    el.textContent = full.slice(0,i+1);
-    i++;
+    el.textContent = full.slice(0,i+1); i++;
     if(i>full.length){ clearInterval(window.__typeInt); }
   }, 65);
 }
 
-/* ============================================================
-   BOOT
-   ============================================================ */
-(async function boot(){
-  await loadDB();
-  initChrome();
-  render();
-})();
+boot();

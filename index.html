@@ -10,16 +10,6 @@
 </head>
 <body data-theme="dark">
 
-<!-- DEMO / PROTOTYPE NOTICE (remove before production) -->
-<!--
-  This is a client-side prototype. All data is stored in the browser's
-  localStorage — there is no real server, database, authentication or
-  file storage. Before production use you would need to replace:
-    - localStorage  -> a real database (Postgres/Firebase/etc.)
-    - passcodes     -> hashed passwords + real auth (sessions/JWT)
-    - file "attach" -> real file upload to server/cloud storage
--->
-
 <div id="toast" class="toast"></div>
 
 <!-- ===================== HEADER ===================== -->
@@ -55,10 +45,7 @@
   <div class="brand"><div class="logo">FV</div><div><div class="name" style="font-size:17px;">Fine Villa</div><div class="tag">Portals</div></div></div>
   <div id="menuSession" class="hide"></div>
   <h4>Portals</h4>
-  <button class="portal-link" data-portal="admin"><span class="ic">🗝️</span> Owner / Admin Portal</button>
-  <button class="portal-link" data-portal="agent"><span class="ic">💼</span> Agent Portal</button>
-  <button class="portal-link" data-portal="caretaker"><span class="ic">🧰</span> Caretaker Portal</button>
-  <button class="portal-link" data-portal="tenant"><span class="ic">🏘️</span> Tenant Portal</button>
+  <button class="portal-link" data-portal="signin"><span class="ic">🔐</span> Sign In</button>
   <h4>Public</h4>
   <button class="portal-link" data-page="home"><span class="ic">🏠</span> Home</button>
   <button class="portal-link" data-page="tour"><span class="ic">🗺️</span> Tour</button>
@@ -100,6 +87,8 @@
   </div>
 </footer>
 
+<!-- Supabase client library — must load BEFORE script.js -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="script.js"></script>
 </body>
 </html>
