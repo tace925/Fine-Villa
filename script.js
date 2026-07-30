@@ -178,7 +178,7 @@ async function loadAll(){
   };
 }
 function mapPerson(p){
-  return { id:p.id, name:p.name, phone:p.phone, email:p.email, id: p.id_number, photo: p.photo_url,
+  return { id:p.id, name:p.name, phone:p.phone, email:p.email, idNumber: p.id_number, photo: p.photo_url,
     start: new Date(p.start_date).getTime(), end: p.end_date ? new Date(p.end_date).getTime() : null,
     active: p.active, passcode: null, house: p.house_no };
 }
