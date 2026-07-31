@@ -11,6 +11,7 @@
 const SUPABASE_URL = "https://ybqwivcmznzqwxupvjii.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_p09ka2D_3bB-gkl_Et-XDQ_I6GosAfG";
 const STORAGE_BUCKET = "tour-images";
+const APP_URL = "https://fine-villa.vercel.app";
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -246,7 +247,7 @@ function openLoginModal(){
   document.getElementById('forgotLink').onclick = async ()=>{
     const email = document.getElementById('li_email').value.trim();
     if(!email){ document.getElementById('loginErr').textContent = 'Enter your email first, then tap "Forgot password?"'; return; }
-    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + window.location.pathname });
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: APP_URL });
     document.getElementById('loginErr').style.color = 'var(--ok)';
     document.getElementById('loginErr').textContent = error ? error.message : 'Reset link sent — check your email.';
   };
@@ -957,7 +958,7 @@ function attachPageEvents(){
     b.onclick = async ()=>{
       const email = b.dataset.resetpw;
       if(!email){ toast('No email on file'); return; }
-      const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + window.location.pathname });
+      const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: APP_URL });
       toast(error ? error.message : 'Reset link sent to '+email);
     };
   });
